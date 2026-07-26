@@ -510,131 +510,133 @@ function init(){
 window.addEventListener("load",init);
 
 // ---------- Save chart + scenario as JPG (for RM client-facing snapshot) ----------
+// Uses lightweight-charts chart.takeScreenshot() which renders the FULL chart
+// (candles + price/time axes + call/put price lines + MA overlay) at device resolution.
+// This fixes the old export that grabbed only the main series canvas -> blurry + no axes.
 function saveSnapshot(){
   const p=readParams();
-  const chartCanvas=$("chart").querySelector("canvas");
-  if(!chartCanvas){alert("Chart not loaded");return;}
-  const W=1400, H=1100;
-  const cv=document.createElement("canvas"); cv.width=W; cv.height=H;
-  const ctx=cv.getContext("2d");
-  ctx.fillStyle="#0a1c38"; ctx.fillRect(0,0,W,H);
+  const shots = CHARTS.map(c=>{
+    try{ return (c.chart && c.chart.takeScreenshot) ? c.chart.takeScreenshot() : null; }catch(e){ return null; }
+  }).filter(Boolean);
+  if(!shots.length){ toast("Chart not loaded"); return; }
+
+  const W=1400, ML=24, MR=W-24, CW=MR-ML;
+  // draw onto a tall offscreen canvas, then crop to the used height (avoids blank clip)
+  const tmp=document.createElement("canvas"); tmp.width=W; tmp.height=2200;
+  const g=tmp.getContext("2d");
+  g.imageSmoothingEnabled=true; g.imageSmoothingQuality="high";
+  g.fillStyle="#0a1c38"; g.fillRect(0,0,W,tmp.height);
 
   // --- title bar ---
   const stk=p.basket?BASKET.join(" + "):p.ticker;
   const stkName=p.basket?BASKET.map(tickerName).join(" + "):tickerName(p.ticker);
-  ctx.fillStyle="#f5c542"; ctx.font="bold 20px Arial"; ctx.textAlign="left";
-  ctx.fillText(`${stk} (${stkName})`,24,36);
-  // terms: coupon freq + callable freq (or period end); NO lockout
+  g.fillStyle="#f5c542"; g.font="bold 20px Arial"; g.textAlign="left";
+  g.fillText(`${stk} (${stkName})`,ML,36);
   const cfreqDisp = {monthly:"Monthly",quarterly:"Quarterly",semi:"Semi-Annual",annual:"Annual"}[p.cfreq]||p.cfreq;
   const callableTxt = p.callable==="daily" ? `${cfreqDisp} + Daily Close` : `${cfreqDisp} + Period End`;
-  ctx.fillStyle="#cfe0ff"; ctx.font="14px Arial";
+  g.fillStyle="#cfe0ff"; g.font="14px Arial";
   const cpnStr = p.coupon ? `${p.coupon}% p.a.` : "(solving)";
-  const terms=`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M`;
-  ctx.fillText(terms,24,60);
-  // --- solve result ---
-  ctx.fillStyle="#f5c542"; ctx.font="bold 16px Arial";
+  g.fillText(`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M`,ML,60);
+  g.fillStyle="#f5c542"; g.font="bold 16px Arial";
   const sv=$("solveVal").textContent;
   const putMatch=sv.match(/([\d.]+)\s*%/);
   const solveLine = p.put==null
     ? `Solve for PUT: ${putMatch?putMatch[1]+"%":"—"}`
     : `Solve for COUPON: ${putMatch?putMatch[1]+"%":"—"}`;
-  ctx.fillText(solveLine,24,84);
+  g.fillText(solveLine,ML,84);
 
-  // --- chart: draw ONLY the main candlestick canvas (skip price/time axis canvases) ---
-  // lightweight-charts canvases all have default 300x150 buffer but CSS-resized via offsetWidth.
-  // Use offsetWidth/Height as the true visible size and resize canvas buffer before drawing.
-  ctx.fillStyle="#cfe0ff"; ctx.font="bold 13px Arial";
-  ctx.fillText("1 · Candlestick Chart (red up / green down)",24,108);
-  const subcharts=[...document.querySelectorAll("#chart .subchart")];
-  const chY=118, chH=380;
-  function drawChartCanvas(srcCanvas,dstX,dstW){
-    const w=srcCanvas.offsetWidth||300, h=srcCanvas.offsetHeight||150;
-    // temporarily resize buffer to match visible size for crisp capture
-    const tmp=document.createElement("canvas"); tmp.width=w; tmp.height=h;
-    const tctx=tmp.getContext("2d");
-    tctx.drawImage(srcCanvas,0,0,w,h);
-    const scale=Math.min(dstW/w, chH/h);
-    const dw=w*scale, dh=h*scale;
-    ctx.drawImage(tmp,dstX+(dstW-dw)/2,chY+(chH-dh)/2,dw,dh);
+  // --- Section 1: chart (full screenshot incl. axes) ---
+  let y=120;
+  g.fillStyle="#cfe0ff"; g.font="bold 14px Arial";
+  g.fillText("1 · Candlestick Chart (red up / green down)",ML,y); y+=18;
+  const chY=y, chH=470;
+  function drawShot(src,x,yy,w,h){
+    const sw=src.width, sh=src.height; if(!sw||!sh)return;
+    const scale=Math.min(w/sw, h/sh);
+    const dw=Math.round(sw*scale), dh=Math.round(sh*scale);
+    g.drawImage(src, x+Math.round((w-dw)/2), yy+Math.round((h-dh)/2), dw, dh);
   }
-  if(subcharts.length<=1){
-    // single: grab the largest visible canvas inside #chart
-    const mains=[...document.querySelectorAll("#chart canvas")].filter(c=>(c.offsetWidth||0)>200);
-    const main=mains.sort((a,b)=>(b.offsetWidth||0)*(b.offsetHeight||0)-(a.offsetWidth||0)*(a.offsetHeight||0))[0];
-    if(main) drawChartCanvas(main,24,W-48);
-  } else {
-    // basket: grab main canvas from each subchart
-    const n=subcharts.length;
-    const gap=8;
-    const slotW=Math.floor((W-48-gap*(n-1))/n);
-    subcharts.forEach((sc,i)=>{
-      const mains=[...sc.querySelectorAll("canvas")].filter(c=>(c.offsetWidth||0)>100);
-      const main=mains.sort((a,b)=>(b.offsetWidth||0)*(b.offsetHeight||0)-(a.offsetWidth||0)*(a.offsetHeight||0))[0];
-      if(main) drawChartCanvas(main,24+i*(slotW+gap),slotW);
+  if(shots.length===1){ drawShot(shots[0],ML,chY,CW,chH); }
+  else{
+    const n=shots.length, gap=12;
+    const slotW=Math.floor((CW-gap*(n-1))/n);
+    shots.forEach((s,i)=>drawShot(s, ML+i*(slotW+gap), chY, slotW, chH));
+  }
+  y=chY+chH+24;
+
+  // --- Section 2: scenario table ---
+  g.fillStyle="#cfe0ff"; g.font="bold 14px Arial";
+  g.fillText("2 · Scenario Analysis (estimated)",ML,y); y+=8;
+  const tbl=$("scnTable");
+  const hdrCells=[...tbl.querySelectorAll("thead th")].map(th=>th.innerText.trim());
+  const colX=[ML, ML+236, ML+336, ML+486, ML+706];   // 5 columns
+  const colGap=10;
+  g.font="bold 12px Arial"; g.fillStyle="#f5c542";
+  hdrCells.forEach((c,ci)=>{ if(ci<colX.length) g.fillText(c,colX[ci],y+14); });
+  y+=22;
+  g.font="12px Arial";
+  [...tbl.querySelectorAll("tbody tr")].forEach(r=>{
+    const cells=[...r.querySelectorAll("td")];
+    const linesPerCell=cells.map((cell,ci)=>{
+      const w=(ci<colX.length-1?colX[ci+1]:MR)-colX[ci]-colGap;
+      return wrapLines(g, cell.innerText.replace(/\s+/g," ").trim(), w);
     });
-  }
-
-  // --- scenario table ---
-  const scnY=520;
-  ctx.fillStyle="#cfe0ff"; ctx.font="bold 13px Arial";
-  ctx.fillText("2 · Scenario Analysis (estimated)",24,scnY);
-  const rows=[...document.querySelectorAll("#scnTable tr")];
-  let ty=scnY+24;
-  const colX=[24,210,300,470,740,980];
-  const colMaxW=[180,84,164,264,230,380];
-  rows.forEach(r=>{
-    const cells=[...r.querySelectorAll("th,td")];
+    const maxLines=Math.max(1,...linesPerCell.map(a=>a.length));
+    const lh=18;
     cells.forEach((cell,ci)=>{
       if(ci>=colX.length)return;
-      const isHdr=cell.tagName==="TH";
-      ctx.fillStyle=isHdr?"#f5c542":"#cfe0ff";
-      ctx.font=isHdr?"bold 12px Arial":"12px Arial";
-      ctx.textAlign="left";
-      const txt=cell.innerText.replace(/\n/g," ").trim().slice(0,40);
-      ctx.fillText(txt,colX[ci],ty);
+      let color="#cfe0ff";
+      const sp=cell.querySelector("span");
+      if(sp){ if(sp.classList.contains("good"))color="#37d67a"; else if(sp.classList.contains("bad"))color="#e23b3b"; }
+      g.fillStyle=color;
+      linesPerCell[ci].forEach((ln,k)=>g.fillText(ln,colX[ci],y+14+k*lh));
     });
-    ty+=22;
+    y+=maxLines*lh+6;
   });
-  // --- coupon & observation arrangement text ---
-  ty+=8;
-  ctx.fillStyle="#f5c542"; ctx.font="bold 12px Arial";
-  ctx.fillText("Coupon & Observation Arrangement:",24,ty); ty+=20;
-  ctx.fillStyle="#cfe0ff"; ctx.font="12px Arial";
-  const perCpn = p.notional * ( (p.coupon||0)/100 ) * (1/{monthly:12,quarterly:4,semi:2,annual:1}[p.cfreq]||12);
-  const totalCpn = p.notional * ( (p.coupon||0)/100 ) * (p.tenor/12);
-  const obsTxt = p.callable==="daily"
-    ? `${cfreqDisp} coupon ${p.ccy} ${perCpn.toFixed(0)} (${p.coupon||0}% p.a.), total max ${p.ccy} ${totalCpn.toFixed(0)}; Daily close observation after 1-month no-call period.`
-    : `${cfreqDisp} coupon ${p.ccy} ${perCpn.toFixed(0)} (${p.coupon||0}% p.a.); Period-end observation.`;
-  // word-wrap
-  wrapText(ctx,obsTxt,24,ty,W-48,18); ty+=36;
-  // delivery detail
-  const putPx = CUR.spot ? (CUR.spot * (CUR.put/100)) : null;
-  if(putPx){
-    const deliv=`Physical delivery at strike ${CUR.put}% if triggered (${p.ccy} ${putPx.toFixed(2)} per share).`;
-    ctx.fillStyle="#90a8d0";
-    wrapText(ctx,deliv,24,ty,W-48,16);
-  }
+
+  // --- Coupon & Observation Arrangement (full, mirrors on-screen scnDetail) ---
+  y+=10;
+  g.fillStyle="#f5c542"; g.font="bold 13px Arial";
+  g.fillText(LANG==="en"?"Coupon & Observation Arrangement":(LANG==="sc"?"票息与收回安排":"票息與收回安排"),ML,y);
+  y+=22;
+  g.fillStyle="#cfe0ff"; g.font="12.5px Arial";
+  const detText=(($("scnDetail").innerText)||"").replace(/\r/g,"").trim();
+  detText.split("\n").forEach(raw=>{
+    const para=raw.trim(); if(!para)return;
+    wrapLines(g,para,MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=19; });
+    y+=4;
+  });
 
   // --- footnote ---
-  ctx.fillStyle="#7090c0"; ctx.font="11px Arial";
-  ctx.fillText(`Generated ${new Date().toISOString().slice(0,10)} · ELN Pricer · Indicative only, not a guarantee of return.`,24,H-20);
-  // download
+  y+=10;
+  g.fillStyle="#7090c0"; g.font="11px Arial";
+  g.fillText(`Generated ${new Date().toISOString().slice(0,10)} · ELN Pricer · Indicative only, not a guarantee of return.`,ML,y);
+
+  // --- crop to used height + export ---
+  const usedH=Math.min(tmp.height, y+24);
+  const cv=document.createElement("canvas"); cv.width=W; cv.height=usedH;
+  const ctx=cv.getContext("2d");
+  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality="high";
+  ctx.drawImage(tmp,0,0,W,usedH,0,0,W,usedH);
   cv.toBlob(blob=>{
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url; a.download=`ELN_${stk}_${new Date().toISOString().slice(0,10)}.jpg`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  },"image/jpeg",0.92);
+  },"image/jpeg",0.95);
 }
-// simple word-wrap for canvas text
-function wrapText(ctx,text,x,y,maxW,lh){
-  const words=text.split(" "); let line="";
-  for(let i=0;i<words.length;i++){
-    const test=line+words[i]+" ";
-    if(ctx.measureText(test).width>maxW && i>0){
-      ctx.fillText(line.trim(),x,y); y+=lh; line=words[i]+" ";
-    } else line=test;
+// CJK-aware word wrap: breaks per token (Chinese chars have no spaces -> per char),
+// keeps latin words intact. Returns array of lines.
+function wrapLines(ctx,text,maxW){
+  if(!text)return [];
+  const tokens=text.match(/\s+|\S/g)||[];
+  const lines=[]; let line="";
+  for(const tk of tokens){
+    const test=line+tk;
+    if(ctx.measureText(test).width>maxW && line!==""){ lines.push(line.trim()); line=(tk===" ")?"":tk; }
+    else line=test;
   }
-  ctx.fillText(line.trim(),x,y);
+  if(line.trim()) lines.push(line.trim());
+  return lines;
 }
