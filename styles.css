@@ -80,6 +80,7 @@ tr.hi{background:rgba(240,192,64,.07)}
 .chartlegend .sma{display:inline-flex;align-items:center;gap:5px}
 .chartlegend .sma select{width:auto;padding:2px 6px;font-size:12px}
 .hl{color:var(--gold)}
+.bank.drv{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
 .cht-tt{position:absolute;z-index:30;background:#102a52ee;border:1px solid var(--gold);border-radius:8px;
   padding:8px 10px;font-size:12px;line-height:1.5;color:var(--txt);pointer-events:none;white-space:nowrap;
   box-shadow:0 6px 20px rgba(0,0,0,.5)}

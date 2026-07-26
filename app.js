@@ -190,16 +190,56 @@ function applySMAOn(c){
 async function loadIV(){
   const p=readParams();
   const strikeGuess=p.call||90;
-  const iv=await fetchIV(p.ticker,p.tenor,strikeGuess);
-  LAST_IV=iv;
-  if(iv.spot)CUR.spot=iv.spot;
   BASKET_IV=[];
   if(p.basket && BASKET.length>=2){
+    // basket: fetch IV for EVERY component
     const results=await Promise.all(BASKET.map(s=>fetchIV(s,p.tenor,strikeGuess).catch(()=>null)));
-    BASKET_IV=results.filter(Boolean).map((r,i)=>({sym:BASKET[i],ivK:r.atStrike,ivA:r.atm}));
+    BASKET_IV=results.map((r,i)=>({sym:BASKET[i],ivK:r?r.atStrike:null,ivA:r?r.atm:null,src:r?r.source:"none",expiry:r?r.expiry:null,spot:r?r.spot:null,strikeUsed:r?r.strikeUsed:null})).filter(x=>x.ivK!=null);
+    // pricing driver = highest-vol component (worst-of)
+    const live=BASKET_IV.filter(x=>x.src==="live");
+    const drv=(live.length?live:BASKET_IV).slice().sort((a,b)=>b.ivK-a.ivK)[0];
+    LAST_IV = drv ? {atm:drv.ivA,atStrike:drv.ivK,spot:drv.spot,source:drv.src,expiry:drv.expiry,strikeUsed:drv.strikeUsed} : {atm:0.5,atStrike:0.6,source:"sample"};
+    renderBasketIV(BASKET_IV, drv);
+  } else {
+    const iv=await fetchIV(p.ticker,p.tenor,strikeGuess);
+    LAST_IV=iv;
+    if(iv.spot)CUR.spot=iv.spot;
+    renderBanks(iv);
   }
-  renderBanks(iv);
 }
+
+// basket mode: one IV card PER component (real per-stock IV, not bank-seeded)
+function renderBasketIV(list, drv){
+  const box=$("banks");box.innerHTML="";
+  list.forEach(x=>{
+    const isDrv = drv && x.sym===drv.sym;
+    const el=document.createElement("div");el.className="bank"+(isDrv?" drv":"");
+    el.innerHTML=`<div class="n">${x.sym}${isDrv?" ★":""}</div><div class="iv">${pct(x.ivA*100,1)}</div>`
+      +`<div class="m">ATM IV · strike IV ${pct(x.ivK*100,1)}</div>`
+      +`<div class="st ${x.src==='live'?'live':'samp'}">${x.src==='live'?('live · '+(x.expiry||'')):'sample'}</div>`;
+    box.appendChild(el);
+  });
+  if(!list.length){
+    box.innerHTML='<div class="bank samp">—</div>';
+  }
+  const names=list.map(x=>`${x.sym} ${pct(x.ivA*100,1)}`).join(" · ");
+  let note;
+  if(LANG==="en"){
+    note=`✅ Real per-stock Option IV (auto-updated): ${names}. Worst-of pricing is driven by <b>${drv?drv.sym:"—"}</b> (highest IV).`;
+  }else if(LANG==="sc"){
+    note=`✅ 篮子内各股真实 Option IV（自动更新）：${names}。Worst-of 定价由 <b>${drv?drv.sym:"—"}</b>（最高 IV）主导。`;
+  }else{
+    note=`✅ 籃子內各股真實 Option IV（自動更新）：${names}。Worst-of 定價由 <b>${drv?drv.sym:"—"}</b>（最高 IV）主導。`;
+  }
+  const anySample=list.some(x=>x.src!=="live");
+  if(anySample||!list.length){
+    note += LANG==="en" ? " ⚠ Components without live IV (e.g. HK stocks) use calibrated table pricing."
+         : LANG==="sc" ? " ⚠ 无 live IV 之成分股（如港股）以校准表定价。"
+         : " ⚠ 無 live IV 之成分股（如港股）以校準表定價。";
+  }
+  $("ivNote").innerHTML=note;
+}
+
 function renderBanks(iv){
   const box=$("banks");box.innerHTML="";
   const banks=["HSBC","JPM","BNP","UBS","SG","Barclays"];
