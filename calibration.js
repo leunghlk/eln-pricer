@@ -123,8 +123,8 @@ function calibHkBasketCoupon(syms, put, mb){
 function calibHkSinglePut(stock, clientCoupon, mb){
   const s=normSym(stock); const ref=CALIB.hk_single_ref[s];
   if(ref==null) return null;
-  // table value is strike% at ~10% client coupon (mb1). Adjust for coupon & mb.
-  const couponRef=10, mbRef=1;
+  // table value is strike% at 8% client coupon, MB1 (user-confirmed basis).
+  const couponRef=8, mbRef=1;
   let put = ref + (clientCoupon-couponRef)*CALIB.hk_single_cpn_slope
                  + (mb-mbRef)*CALIB.hk_single_mb_slope;
   return +put.toFixed(2);
@@ -132,7 +132,34 @@ function calibHkSinglePut(stock, clientCoupon, mb){
 function calibHkSingleCoupon(stock, put){
   const s=normSym(stock); const ref=CALIB.hk_single_ref[s];
   if(ref==null) return null;
-  return +(10 + (put-ref)/CALIB.hk_single_cpn_slope).toFixed(2);
+  return +(8 + (put-ref)/CALIB.hk_single_cpn_slope).toFixed(2);
+}
+
+// ---- HK basket DERIVED from single table (covers ALL combinations) ----
+// Rule (reverse-engineered from real quotes):
+//   basket worst-of put ≈ min(component single strikes @8%) shifted by
+//   (coupon - 8 - premium) * cpn_slope + (mb-1) * mb_slope
+//   premium = 2% for 2 stocks, +1% per extra stock (worst-of pays more coupon).
+// Verified: 992+3690 @10% mb1 → 64 (table 64 ✓), @mb2 → 71 (table 71 ✓),
+//           992+1211 @10% mb1 → 64 (table 65, ±1), @12% → 66 (table 67, ±1)
+function calibHkBasketDerivedPut(syms, clientCoupon, mb){
+  const refs=syms.map(s=>CALIB.hk_single_ref[normSym(s)]);
+  if(refs.some(r=>r==null)) return null;   // any unknown component → cannot derive
+  const n=syms.length;
+  const base=Math.min(...refs);            // highest-vol name (lowest strike) drives
+  const premium=2+(n-2);                   // 2股=2%, 3股=3%
+  const put = base + (clientCoupon-8-premium)*CALIB.hk_basket_cpn_slope
+                   + (mb-1)*CALIB.hk_basket_mb_slope;
+  return +put.toFixed(2);
+}
+function calibHkBasketDerivedCoupon(syms, put, mb){
+  const refs=syms.map(s=>CALIB.hk_single_ref[normSym(s)]);
+  if(refs.some(r=>r==null)) return null;
+  const n=syms.length;
+  const base=Math.min(...refs);
+  const premium=2+(n-2);
+  const c = 8+premium + (put - base - (mb-1)*CALIB.hk_basket_mb_slope)/CALIB.hk_basket_cpn_slope;
+  return +c.toFixed(2);
 }
 
 // US basket (worst-of): match nearest real quote by tenor+mb, interp on call

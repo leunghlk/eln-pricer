@@ -42,8 +42,26 @@ async function runAll(){
   $("err").style.display="none";
   const p=readParams();
   if(!p.tenor||p.tenor<1){$("err").style.display="block";$("err").textContent="Tenor ≥ 1";return;}
+  // Solve-target validation: exactly ONE of coupon / put must be blank
+  const hasC=p.coupon!=null, hasP=p.put!=null;
+  if(!hasC && !hasP){
+    const m={tc:"請輸入 Client Coupon 或 Put/Strike 其中一項（留空另一項，系統自動求解）。",
+             sc:"请输入 Client Coupon 或 Put/Strike 其中一项（留空另一项，系统自动求解）。",
+             en:"Please enter EITHER Client Coupon OR Put/Strike (leave the other blank to auto-solve)."};
+    alert(m[LANG]||m.tc);
+    $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+    return;
+  }
+  if(hasC && hasP){
+    const m={tc:"Coupon 同 Put/Strike 只可填一項，另一項留空由系統求解。請清走其中一個。",
+             sc:"Coupon 与 Put/Strike 只可填一项，另一项留空由系统求解。请清除其中一个。",
+             en:"Fill in ONLY ONE of Coupon / Put-Strike — the other must stay blank for the solver. Please clear one."};
+    alert(m[LANG]||m.tc);
+    $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+    return;
+  }
   $("tickerName").textContent="→ "+tickerName(p.ticker);
-  await loadChart("6mo");
+  await loadChart(CUR.range||"6mo");
   await loadIV();
   recompute();
 }
@@ -66,8 +84,9 @@ function newChart(el){
     borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59"});
   const maSeries=chart.addLineSeries({color:"#f5c542",lineWidth:2,priceLineVisible:false,lastValueVisible:true,
     title:"MA"});
-  chart.subscribeCrosshairMove(param=>onHover(param,series,el));
-  return {chart,series,maSeries,_call:null,_put:null,_spot:0};
+  const c={chart,series,maSeries,_call:null,_put:null,_spot:0,_tt:null,_lvlNote:null,_data:null};
+  chart.subscribeCrosshairMove(param=>onHover(param,c,el));
+  return c;
 }
 
 function renderCharts(tickers, all){
@@ -84,10 +103,13 @@ function renderCharts(tickers, all){
       ? '<span style="color:#ffb454">[SAMPLE 假數據]</span>'
       : '<span style="color:#37d67a">● 真實數據：'+all[i].provider+'</span>';
     cap.innerHTML=`<b>${t}</b> · ${tickerName(t)} <span style="font-size:11px">${src}</span>`;
-    const el=document.createElement("div");el.className="subel";el.style.height="300px";
-    box.appendChild(cap);box.appendChild(el);wrap.appendChild(box);
+    const el=document.createElement("div");el.className="subel";el.style.height="300px";el.style.position="relative";
+    const tt=document.createElement("div");tt.className="cht-tt";tt.style.display="none";
+    const lvlNote=document.createElement("div");lvlNote.className="lvlnote";
+    box.appendChild(cap);box.appendChild(el);el.appendChild(tt);box.appendChild(lvlNote);wrap.appendChild(box);
     const c=newChart(el);
     c._spot = all[i].data.length ? all[i].data[all[i].data.length-1].close : 0;
+    c._tt = tt; c._lvlNote = lvlNote; c._data = all[i].data;
     c.series.setData(all[i].data);
     c.chart.timeScale().fitContent();
     CHARTS.push(c);
@@ -96,18 +118,19 @@ function renderCharts(tickers, all){
   applySMAAll();
 }
 
-function onHover(param,series,el){
-  const tt=$("tooltip");
+function onHover(param,c,el){
+  const tt=c._tt; if(!tt)return;
   if(!param.time||!param.point){tt.style.display="none";return;}
-  const d=param.seriesData.get(series);
+  const d=param.seriesData.get(c.series);
   if(!d){tt.style.display="none";return;}
   const up=d.close>=d.open;
   tt.innerHTML=`<b>${param.time}</b><br>開 ${fmt(d.open)} · 高 ${fmt(d.high)}<br>低 ${fmt(d.low)} · 收 ${fmt(d.close)} `+
     `<span style="color:${up?'#e23b3b':'#1faa59'}">${up?'▲':'▼'}${fmt(d.close-d.open)}</span>`;
   tt.style.display="block";
-  const wrap=el.getBoundingClientRect();
+  const w=el.getBoundingClientRect();
   let x=param.point.x+16, y=param.point.y+12;
-  if(x>wrap.width-170)x=param.point.x-170;
+  if(x>w.width-170)x=param.point.x-180;
+  if(y>w.height-90)y=param.point.y-90;
   tt.style.left=x+"px"; tt.style.top=y+"px";
 }
 
@@ -118,8 +141,23 @@ function drawLevelsOn(c){
   if(c._call)c.series.removePriceLine(c._call);
   if(c._put)c.series.removePriceLine(c._put);
   if(!c._spot||!CUR.call||!CUR.put)return;
+  const putPx=c._spot*CUR.put/100;
   c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
-  c._put =c.series.createPriceLine({price:c._spot*CUR.put/100,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
+  c._put =c.series.createPriceLine({price:putPx,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
+  // "put level ≈ 幾耐之前嘅水平" — most recent date price traded at/below put level
+  if(c._lvlNote){
+    const ds=c._data||[];
+    let hit=null;
+    for(let i=ds.length-1;i>=0;i--){ if(ds[i].low!=null && ds[i].low<=putPx){hit=ds[i];break;} }
+    if(hit){
+      const dHit=new Date(hit.time), now=new Date();
+      const months=Math.max(0,Math.round((now-dHit)/(30.44*864e5)));
+      const ago = months>=12 ? `${(months/12).toFixed(1)} 年前` : `${months} 個月前`;
+      c._lvlNote.innerHTML=`🔻 Put ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，約為 <b class="hl">${hit.time}</b>（${ago}）嘅水平`;
+    }else{
+      c._lvlNote.innerHTML=`🔻 Put ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，顯示範圍內未見此水平（更耐之前／歷史新低區）— 可撳 3Y/5Y/10Y 睇`;
+    }
+  }
 }
 
 // REAL moving average as a line series (not a flat price line)
@@ -208,9 +246,22 @@ function recompute(){
         else if(!hasCoupon && hasPut){const r=calibUsBasketCoupon(BASKET,p.put,p.mb,p.tenor,p.call); if(r)calibHit={put:p.put,coupon:r.coupon,src:"FinIQ US basket"};}
         else if(!hasCoupon && !hasPut){const r=calibUsBasketPut(BASKET,18,p.mb,p.tenor,p.call); if(r)calibHit={put:r.put,coupon:r.quoteCoupon,src:"FinIQ US basket (預設)"};}
       } else {
-        if(!hasPut && hasCoupon){const v=calibHkBasketPut(BASKET,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ HK basket table"};}
-        else if(!hasCoupon && hasPut){const v=calibHkBasketCoupon(BASKET,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK basket table"};}
-        else if(!hasCoupon && !hasPut){const v=calibHkBasketPut(BASKET,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK basket table (預設10%)"};}
+        // HK basket: exact real-quote table first, then DERIVED from single table (all combos)
+        if(!hasPut && hasCoupon){
+          let v=calibHkBasketPut(BASKET,p.coupon,p.mb);
+          if(v==null)v=calibHkBasketDerivedPut(BASKET,p.coupon,p.mb);
+          if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ HK basket"};
+        }
+        else if(!hasCoupon && hasPut){
+          let v=calibHkBasketCoupon(BASKET,p.put,p.mb);
+          if(v==null)v=calibHkBasketDerivedCoupon(BASKET,p.put,p.mb);
+          if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK basket"};
+        }
+        else if(!hasCoupon && !hasPut){
+          let v=calibHkBasketPut(BASKET,10,p.mb);
+          if(v==null)v=calibHkBasketDerivedPut(BASKET,10,p.mb);
+          if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK basket (預設10%)"};
+        }
       }
     } else if(isHK(usSym(p.ticker))) {
       // HK single — calibration table only
@@ -315,13 +366,15 @@ function init(){
   document.querySelectorAll(".langsw button").forEach(b=>b.onclick=()=>{LANG=b.dataset.l;localStorage.setItem("eln_lang",LANG);applyLang();});
   $("run").onclick=runAll;
   $("reset").onclick=()=>location.reload();
-  document.querySelectorAll(".toolbar [data-r]").forEach(b=>b.onclick=()=>loadChart(b.dataset.r).then(recompute));
+  document.querySelectorAll(".toolbar [data-r]").forEach(b=>b.onclick=()=>{CUR.range=b.dataset.r;loadChart(b.dataset.r).then(recompute);});
   $("smaOn").onchange=e=>{SMA_ON=e.target.checked;applySMAAll();};
   $("smaN").onchange=()=>{ if(SMA_ON)applySMAAll(); };
   $("refresh").onclick=()=>runAll();
   ["call","mb","coupon","put","cfreq","callable","tenor","notional","lockout","issue","bk1","bk2","bk3"].forEach(id=>
     $(id).addEventListener("input",()=>{if(CUR.spot)recompute();}));
   $("issue").value=new Date().toISOString().slice(0,10);
+  // default demo state: put=45 filled so initial auto-run passes validation
+  if($("coupon").value===""&&$("put").value==="")$("put").value=45;
   setTimeout(runAll,300);
 }
 window.addEventListener("load",init);

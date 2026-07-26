@@ -23,7 +23,7 @@ const UNIVERSE = [
   ["MRVL","MRVL","Marvell Technology"],
   ["CRDO","CRDO","Credo Technology"],
   ["992","0992.HK","Lenovo Group"],
-  ["9992","9992.HK","Pop Mart? 請確認 09992.HK"],
+  ["9992","9992.HK","Pop Mart 09992.HK"],
   ["700","0700.HK","Tencent Holdings"],
   ["9988","9988.HK","Alibaba Group"],
   ["3690","3690.HK","Meituan"],
@@ -50,8 +50,8 @@ const FINNHUB_KEY = "d9iu7nhr01qvkt7ea1l0d9iu7nhr01qvkt7ea1lg"; // 即時報價�
 // ---- CANDLES (Worker/Yahoo primary → Twelve Data → sample) ----
 async function fetchCandles(input, range){
   const y=usSym(input);
-  const days = range==="3mo"?66:range==="6mo"?132:252;
-  const yr = range==="3mo"?"3mo":range==="6mo"?"6mo":"1y";
+  const days = range==="3mo"?66:range==="6mo"?132:range==="1y"?252:range==="3y"?756:range==="5y"?1260:range==="10y"?2520:252;
+  const yr = ["3mo","6mo","1y","3y","5y","10y"].includes(range)?range:"1y";
   // 1) Worker proxy → Yahoo（美股+港股統一，有 CORS）
   try{
     const url=`${WORKER_URL}/chart?symbol=${encodeURIComponent(y)}&range=${yr}&interval=1d`;
