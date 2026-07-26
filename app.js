@@ -142,7 +142,7 @@ function applySMAOn(c){
 // ---------- IV ----------
 async function loadIV(){
   const p=readParams();
-  const strikeGuess=p.put||45;
+  const strikeGuess=p.call||90;
   const iv=await fetchIV(p.ticker,p.tenor,strikeGuess);
   LAST_IV=iv;
   if(iv.spot)CUR.spot=iv.spot;
