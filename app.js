@@ -1,10 +1,11 @@
 // ELN Pricer — app wiring
 let LANG=localStorage.getItem("eln_lang")||"tc";
-let CHART=null,SERIES=null,CALL_LINE=null,PUT_LINE=null;
-let CUR={};              // current solved state for chart lines
+let CHARTS=[];            // array of {chart,series,_call,_put,_sma}
+let CUR={};               // current solved state for chart lines {spot,call,put}
 let LAST_IV=null;        // last IV object (primary ticker)
 let BASKET=[];           // selected tickers for basket
-let BASKET_IV=[];        // [{sym, ivK, ivA}] fetched for basket members
+let BASKET_IV=[];       // [{sym, ivK, ivA}] fetched for basket members
+let SMA_ON=false,SMA_N=10;
 const $=id=>document.getElementById(id);
 const fmt=(n,d=2)=>(n==null||isNaN(n))?"—":Number(n).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
 const pct=(n,d=2)=>(n==null||isNaN(n))?"—":Number(n).toFixed(d)+"%";
@@ -41,80 +42,111 @@ async function runAll(){
   recompute();
 }
 
+// ---------- chart (single + basket dual) ----------
 async function loadChart(range){
-  $("chartErr").style.display="none";
   const p=readParams();
-  const {data,source,provider}=await fetchCandles(p.ticker,range);
-  CUR.spot=data.length?data[data.length-1].close:0;
-  renderChart(data);
-  if(source==="sample"){$("chartErr").style.display="block";
-    $("chartErr").innerHTML='<span style="color:#ffb454">[SAMPLE 假數據 — 真實報價取不到，可能係 HK 股要 Twelve Data key，或 CORS 阻擋]</span>';}
-  else{$("chartErr").style.display="block";
-    $("chartErr").innerHTML=`<span style="color:#37d67a">● 真實數據：${provider}</span>`;}
+  const tickers = (p.basket && BASKET.length>=2) ? BASKET : [p.ticker];
+  const all=await Promise.all(tickers.map(t=>fetchCandles(t,range).catch(()=>({data:sampleCandles(132),source:"sample",provider:"sample"}))));
+  CUR.spot = all[0].data.length ? all[0].data[all[0].data.length-1].close : 0;
+  renderCharts(tickers, all);
 }
 
-function renderChart(data){
-  if(!CHART){
-    CHART=LightweightCharts.createChart($("chart"),{
-      layout:{background:{color:"#0a1c38"},textColor:"#cfe0ff"},
-      grid:{vertLines:{color:"#13294d"},horzLines:{color:"#13294d"}},
-      rightPriceScale:{borderColor:"#1d3a66"},timeScale:{borderColor:"#1d3a66"},crosshair:{mode:1}});
-    SERIES=CHART.addCandlestickSeries({upColor:"rgba(226,59,59,0)",downColor:"#1faa59",
-      borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59",
-      autoscaleInfoProvider:orig=>{
-        const r=orig&&orig();
-        if(!r||!CUR.spot)return r;
-        const lvls=[];
-        if(CUR.call)lvls.push(CUR.spot*CUR.call/100);
-        if(CUR.put)lvls.push(CUR.spot*CUR.put/100);
-        if(!lvls.length)return r;
-        let lo=r.priceRange?r.priceRange.minValue:Math.min(...lvls);
-        let hi=r.priceRange?r.priceRange.maxValue:Math.max(...lvls);
-        lvls.forEach(v=>{lo=Math.min(lo,v);hi=Math.max(hi,v);});
-        const pad=(hi-lo)*0.05||hi*0.05;
-        return {priceRange:{minValue:lo-pad,maxValue:hi+pad}};
-      }});
-    // hollow bull = transparent body + red border; filled bear = green body
-    CHART.subscribeCrosshairMove(onHover);
-  }
-  SERIES.setData(data);
-  CHART.timeScale().fitContent();
-  drawLevels();
+function newChart(el){
+  const chart=LightweightCharts.createChart(el,{
+    layout:{background:{color:"#0a1c38"},textColor:"#cfe0ff"},
+    grid:{vertLines:{color:"#13294d"},horzLines:{color:"#13294d"}},
+    rightPriceScale:{borderColor:"#1d3a66"},timeScale:{borderColor:"#1d3a66"},crosshair:{mode:1}});
+  const series=chart.addCandlestickSeries({upColor:"rgba(226,59,59,0)",downColor:"#1faa59",
+    borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59",
+    autoscaleInfoProvider:orig=>{
+      const r=orig&&orig();
+      if(!r||!CUR.spot)return r;
+      const lvls=[];
+      if(CUR.call)lvls.push(CUR.spot*CUR.call/100);
+      if(CUR.put)lvls.push(CUR.spot*CUR.put/100);
+      if(!lvls.length)return r;
+      let lo=r.priceRange?r.priceRange.minValue:Math.min(...lvls);
+      let hi=r.priceRange?r.priceRange.maxValue:Math.max(...lvls);
+      lvls.forEach(v=>{lo=Math.min(lo,v);hi=Math.max(hi,v);});
+      const pad=(hi-lo)*0.05||hi*0.05;
+      return {priceRange:{minValue:lo-pad,maxValue:hi+pad}};
+    }});
+  chart.subscribeCrosshairMove(param=>onHover(param,series,el));
+  return {chart,series,_call:null,_put:null,_sma:null};
 }
-function onHover(param){
+
+function renderCharts(tickers, all){
+  const wrap=$("chart");
+  // rebuild containers
+  CHARTS.forEach(c=>{try{c.chart.remove();}catch(e){}});
+  CHARTS=[];
+  wrap.innerHTML="";
+  const isBasket = tickers.length>=2;
+  wrap.style.gridTemplateColumns = isBasket ? "1fr 1fr" : "1fr";
+  tickers.forEach((t,i)=>{
+    const box=document.createElement("div");box.className="subchart";
+    const cap=document.createElement("div");cap.className="subcap";
+    const src=all[i].source==="sample"
+      ? '<span style="color:#ffb454">[SAMPLE 假數據]</span>'
+      : '<span style="color:#37d67a">● 真實數據：'+all[i].provider+'</span>';
+    cap.innerHTML=`<b>${t}</b> · ${tickerName(t)} <span style="font-size:11px">${src}</span>`;
+    const el=document.createElement("div");el.className="subel";el.style.height="300px";
+    box.appendChild(cap);box.appendChild(el);wrap.appendChild(box);
+    const c=newChart(el);
+    c.series.setData(all[i].data);
+    c.chart.timeScale().fitContent();
+    CHARTS.push(c);
+  });
+  drawLevelsAll();
+  applySMAAll();
+}
+
+function onHover(param,series,el){
   const tt=$("tooltip");
   if(!param.time||!param.point){tt.style.display="none";return;}
-  const d=param.seriesData.get(SERIES);
+  const d=param.seriesData.get(series);
   if(!d){tt.style.display="none";return;}
   const up=d.close>=d.open;
-  tt.innerHTML=`<b>${param.time}</b><br>開 ${fmt(d.open)} · 高 ${fmt(d.high)}<br>低 ${fmt(d.low)} · 收 ${fmt(d.close)} `
-    +`<span style="color:${up?'#e23b3b':'#1faa59'}">${up?'▲':'▼'}${fmt(d.close-d.open)}</span>`;
+  tt.innerHTML=`<b>${param.time}</b><br>開 ${fmt(d.open)} · 高 ${fmt(d.high)}<br>低 ${fmt(d.low)} · 收 ${fmt(d.close)} `+
+    `<span style="color:${up?'#e23b3b':'#1faa59'}">${up?'▲':'▼'}${fmt(d.close-d.open)}</span>`;
   tt.style.display="block";
-  const wrap=$("chart").getBoundingClientRect();
+  const wrap=el.getBoundingClientRect();
   let x=param.point.x+16, y=param.point.y+12;
   if(x>wrap.width-170)x=param.point.x-170;
   tt.style.left=x+"px"; tt.style.top=y+"px";
 }
-function drawLevels(){
-  if(!CHART)return;
-  if(CALL_LINE)SERIES.removePriceLine(CALL_LINE);
-  if(PUT_LINE)SERIES.removePriceLine(PUT_LINE);
+
+function drawLevelsAll(){ CHARTS.forEach(drawLevelsOn); }
+function drawLevelsOn(c){
+  if(!c||!c.chart)return;
+  if(c._call)c.series.removePriceLine(c._call);
+  if(c._put)c.series.removePriceLine(c._put);
   if(!CUR.spot||!CUR.call||!CUR.put)return;
-  CALL_LINE=SERIES.createPriceLine({price:CUR.spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,
-    axisLabelVisible:true,title:`Call ${CUR.call}%`});
-  PUT_LINE=SERIES.createPriceLine({price:CUR.spot*CUR.put/100,color:"#e23b3b",lineWidth:2,lineStyle:2,
-    axisLabelVisible:true,title:`Put ${CUR.put}%`});
-  // force y-axis to recompute so deep-OTM put line stays visible
-  try{CHART.priceScale("right").applyOptions({autoScale:true});}catch(e){}
+  c._call=c.series.createPriceLine({price:CUR.spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
+  c._put =c.series.createPriceLine({price:CUR.spot*CUR.put/100,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
+  try{c.chart.priceScale("right").applyOptions({autoScale:true});}catch(e){}
 }
 
+function applySMAAll(){ CHARTS.forEach(applySMAOn); }
+function applySMAOn(c){
+  if(!c||!c.chart)return;
+  if(c._sma)c.series.removePriceLine(c._sma);c._sma=null;
+  if(!SMA_ON)return;
+  SMA_N=+$("smaN").value||10;
+  const ds=c.series.data(); if(!ds||ds.length<SMA_N)return;
+  const vals=ds.map(d=>d.close);
+  const sma=vals.map((_,i)=>{if(i<SMA_N-1)return null;let s=0;for(let k=0;k<SMA_N;k++)s+=vals[i-k];return {time:ds[i].time,value:+(s/SMA_N).toFixed(2)};}).filter(Boolean);
+  if(!sma.length)return;
+  c._sma=c.series.createPriceLine({price:sma[sma.length-1].value,color:"#f5c542",lineWidth:2,lineStyle:0,axisLabelVisible:true,title:`MA${SMA_N}`});
+}
+
+// ---------- IV ----------
 async function loadIV(){
   const p=readParams();
   const strikeGuess=p.put||45;
   const iv=await fetchIV(p.ticker,p.tenor,strikeGuess);
   LAST_IV=iv;
   if(iv.spot)CUR.spot=iv.spot;
-  // basket: fetch IV for each selected member (parallel)
   BASKET_IV=[];
   if(p.basket && BASKET.length>=2){
     const results=await Promise.all(BASKET.map(s=>fetchIV(s,p.tenor,strikeGuess).catch(()=>null)));
@@ -132,24 +164,31 @@ function renderBanks(iv){
     const el=document.createElement("div");el.className="bank";
     el.innerHTML=`<div class="n">${b}</div><div class="iv">${pct(v*100,1)}</div>`
       +`<div class="m">ATM IV</div><div class="st ${iv.source==='live'?'live':'samp'}">`
-      +`${iv.source==='live'?'live · '+ (iv.expiry||''):'sample (seeded)'}</div>`;
+      +`${iv.source==='live'?('live · '+ (iv.expiry||'')):'sample (seeded)'}</div>`;
     box.appendChild(el);
   });
   $("ivNote").innerHTML = iv.source==="live"
-    ? `✅ 真實 option IV（Yahoo，自動更新）· ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}。5 行為按慣例 spread 調整之 indicative。`
+    ? `✅ 真實 Option IV（Yahoo，自動更新）· ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}。`
     : `⚠ 真實 IV 暫取不到（HK 股或 rate-limit），顯示 <b>sample</b>。實盤以銀行 indicative 為準。`;
 }
 
+// ---------- recompute (live IV priority for single stock) ----------
 function recompute(){
   const p=readParams();
   if(p.basket && BASKET_IV.length>=2) p.basket=BASKET_IV;
-  // ---- PREFER real FinIQ calibration table ----
+
+  // Determine default coupon (for solve card / defaults) — live IV model
+  const defaultCoupon = (()=>{
+    const r=solveParams({...p,put:p.put||45,coupon:null}, LAST_IV);
+    return r.out.coupon;
+  })();
+
+  // ---- PREFER real FinIQ calibration table (baskets + HK) ----
   let calibHit=null;
   const hasCoupon=p.coupon!=null&&p.coupon!==""&&!isNaN(p.coupon);
   const hasPut=p.put!=null&&p.put!==""&&!isNaN(p.put);
   try{
     if(p.basket && BASKET.length>=2){
-      // US basket? (has real quote table)
       const isUsBk = calibUsBasketPut(BASKET,p.coupon||18,p.mb,p.tenor,p.call)!=null;
       if(isUsBk){
         if(!hasPut && hasCoupon){const r=calibUsBasketPut(BASKET,p.coupon,p.mb,p.tenor,p.call); if(r)calibHit={put:r.put,coupon:p.coupon,src:`FinIQ US basket${r.bank?' ('+r.bank+')':''}`};}
@@ -160,18 +199,22 @@ function recompute(){
         else if(!hasCoupon && hasPut){const v=calibHkBasketCoupon(BASKET,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK basket table"};}
         else if(!hasCoupon && !hasPut){const v=calibHkBasketPut(BASKET,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK basket table (預設10%)"};}
       }
-    } else {
-      if(!hasPut && hasCoupon){const v=calibUsPut(p.ticker,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ single-stock table"};}
-      else if(!hasCoupon && hasPut){const v=calibUsCoupon(p.ticker,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ single-stock table"};}
-      else if(!hasCoupon && !hasPut){const v=calibUsPut(p.ticker,8,p.mb); if(v!=null)calibHit={put:v,coupon:8,src:"FinIQ single-stock table (預設8%)"};}
+    } else if(isHK(usSym(p.ticker))) {
+      // HK single — calibration table only
+      if(!hasPut && hasCoupon){const v=calibHkSinglePut(p.ticker,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ HK single table"};}
+      else if(!hasCoupon && hasPut){const v=calibHkSingleCoupon(p.ticker,p.put); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK single table"};}
+      else if(!hasCoupon && !hasPut){const v=calibHkSinglePut(p.ticker,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK single (預設10%)"};}
     }
+    // US single: NOT using static table (IV volatile) → fall through to live IV model
   }catch(e){}
+
   let out,solved;
   if(calibHit){
     out={...p,coupon:calibHit.coupon,put:calibHit.put,gross:+(calibHit.coupon+p.mb).toFixed(2),basketAdj:1};
     solved={which:(hasCoupon&&!hasPut)?"put":(hasPut&&!hasCoupon)?"coupon":"both",
       note:`${T("srcReal")} <b>${calibHit.src}</b> · ${T("cCoupon")} ${pct(calibHit.coupon)} · ${T("cPut")} ${pct(calibHit.put)}`};
   } else {
+    // live IV model (US single primary; also HK fallback)
     const r=solveParams(p,LAST_IV); out=r.out; solved=r.solved;
     solved.note=T("srcEst")+"<br>"+solved.note;
   }
@@ -186,11 +229,12 @@ function recompute(){
   $("solveNote").innerHTML=solved.note;
   // chart lines
   CUR.call=p.call;CUR.put=out.put;
-  drawLevels();
+  drawLevelsAll();
   // scenarios
   const S=buildScenarios({...out,tenor:p.tenor,cfreq:p.cfreq,notional:p.notional,ccy:p.ccy,spot:CUR.spot,issue:p.issue,lockout:p.lockout});
   renderScenarios(S,p,out);
 }
+
 function renderScenarios(S,p,out){
   const tb=$("scnBody");tb.innerHTML="";
   const cpA=out.coupon/100;
@@ -214,32 +258,31 @@ function renderScenarios(S,p,out){
   // ---- detail block (client-facing, formal, NO MB) ----
   const strikePx=S.strikePx, shares=S.shares;
   const notional=p.notional, ccy=sym(p.ccy);
-  // worst-of delivery details
   let worstName=p.ticker;
   if(p.basket && BASKET.length>=2) worstName=T("worstPerformer");
-  // fee assumption 0.25% brokerage on delivery (typical)
   const feeRate=0.0025;
   const deliveryVal=shares*strikePx;
   const fee=deliveryVal*feeRate;
   const wholeShares=Math.floor(shares);
   const fracCash=(shares-wholeShares)*strikePx;
-  const remainCash=fracCash - fee;   // odd-lot fractional returned as cash, less fee
-
+  const remainCash=fracCash - fee;
+  // highlight values
+  const hl=s=>`<b class="hl">${s}</b>`;
   let html=`<div class="scnhead">${T("scnDetailTitle")}</div>`;
-  html+=`<p>${T("perCpnLine")}：<b>${ccy}${fmt(S.perCpn,0)}</b>（${T("cCoupon")} ${pct(out.coupon)} p.a.）· ${T("maxTotalLine")}：<b>${ccy}${fmt(S.totalCpnIfHeld,0)}</b></p>`;
+  html+=`<p>${T("perCpnLine")}：${hl(ccy+fmt(S.perCpn,0))}（${T("cCoupon")} ${pct(out.coupon)} p.a.）· ${T("maxTotalLine")}：${hl(ccy+fmt(S.totalCpnIfHeld,0))}</p>`;
   html+=`<p>${T("obsLine")}：${p.callable==="daily"
       ? T("dailyObs").replace("{m}",S.firstObsMonths)
       : T("periodObs")}</p>`;
   html+=`<div class="scnhead2">${T("deliveryTitle")}</div>`;
   html+=`<p>${T("deliveryDesc")
-      .replace("{worst}",`<b>${worstName}</b>`)
-      .replace("{strikePct}",pct(out.put))
-      .replace("{strikePx}",`${ccy}${fmt(strikePx,2)}`)
-      .replace("{notional}",`${ccy}${fmt(notional,0)}`)
-      .replace("{shares}",`<b>${fmt(wholeShares,0)}</b>`)}</p>`;
+      .replace("{worst}",hl(worstName))
+      .replace("{strikePct}",hl(pct(out.put)))
+      .replace("{strikePx}",hl(ccy+fmt(strikePx,2)))
+      .replace("{notional}",hl(ccy+fmt(notional,0)))
+      .replace("{shares}",hl(fmt(wholeShares,0)))}</p>`;
   html+=`<p>${T("deliveryCash")
-      .replace("{fee}",`${ccy}${fmt(fee,2)}`)
-      .replace("{cash}",`<b>${ccy}${fmt(Math.max(0,remainCash),2)}</b>`)}</p>`;
+      .replace("{fee}",hl(ccy+fmt(fee,2)))
+      .replace("{cash}",hl(ccy+fmt(Math.max(0,remainCash),2)))}</p>`;
   html+=`<p class="warn">${T("deliveryRisk")}</p>`;
   $("scnDetail").innerHTML=html;
 }
@@ -264,10 +307,11 @@ function init(){
   $("reset").onclick=()=>location.reload();
   $("basketOn").onchange=e=>$("basketBox").classList.toggle("on",e.target.checked);
   document.querySelectorAll(".toolbar [data-r]").forEach(b=>b.onclick=()=>loadChart(b.dataset.r).then(recompute));
+  $("smaOn").onchange=e=>{SMA_ON=e.target.checked;applySMAAll();};
+  $("smaN").onchange=()=>{ if(SMA_ON)applySMAAll(); };
   $("refresh").onclick=()=>runAll();
   ["call","mb","coupon","put","cfreq","callable","tenor","notional","lockout","issue"].forEach(id=>
     $(id).addEventListener("input",()=>{if(CUR.spot)recompute();}));
-  // default issue = today
   $("issue").value=new Date().toISOString().slice(0,10);
   setTimeout(runAll,300);
 }

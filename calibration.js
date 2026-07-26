@@ -20,6 +20,8 @@ const CALIB = {
     "992":64, "9992":76, "9988":77, "3690":75, "1211":80,
     "9999":83, "700":85, "5":90, "2388":91.5
   },
+  hk_single_cpn_slope: 1.5,   // +1.5p strike per +1% coupon
+  hk_single_mb_slope: 7,      // +7p strike per +1% MB
 
   // ---- 港股 basket (worst-of)，90call, 3M, T+1week ----
   // key = 成分股 sorted join "+"；每個 {mb: {clientCoupon: put}}
@@ -118,7 +120,22 @@ function calibHkBasketCoupon(syms, put, mb){
   return +(cs[0]+(p-base[cs[0]])/CALIB.hk_basket_cpn_slope).toFixed(2);
 }
 
-// ---- US basket (worst-of): match nearest real quote by tenor+mb, interp on call ----
+function calibHkSinglePut(stock, clientCoupon, mb){
+  const s=normSym(stock); const ref=CALIB.hk_single_ref[s];
+  if(ref==null) return null;
+  // table value is strike% at ~10% client coupon (mb1). Adjust for coupon & mb.
+  const couponRef=10, mbRef=1;
+  let put = ref + (clientCoupon-couponRef)*CALIB.hk_single_cpn_slope
+                 + (mb-mbRef)*CALIB.hk_single_mb_slope;
+  return +put.toFixed(2);
+}
+function calibHkSingleCoupon(stock, put){
+  const s=normSym(stock); const ref=CALIB.hk_single_ref[s];
+  if(ref==null) return null;
+  return +(10 + (put-ref)/CALIB.hk_single_cpn_slope).toFixed(2);
+}
+
+// US basket (worst-of): match nearest real quote by tenor+mb, interp on call
 function _usBasketRow(syms){ return CALIB.us_basket[basketKey(syms)]||null; }
 function _nearest(rows, tenor, mb){
   // rank by |tenor diff| then |mb diff|

@@ -101,10 +101,10 @@
       </div>
       <div class="chartwrap" id="chart"><div id="tooltip"></div></div>
       <div class="chartlegend">
-        <span>🟥 <b data-i="c_up"></b></span>
-        <span>🟩 <b data-i="c_down"></b></span>
         <span class="pill call" data-i="c_call"></span>
         <span class="pill put" data-i="c_put"></span>
+        <span class="sma"><label><input type="checkbox" id="smaOn"> <span data-i="c_sma"></span></label>
+          <select id="smaN"><option value="10">MA10</option><option value="20">MA20</option><option value="50">MA50</option></select></span>
         <span>🖱 <span data-i="c_hover"></span></span>
       </div>
       <div class="err" id="chartErr"></div>
