@@ -1,12 +1,15 @@
 // ELN Pricer — solver + scenario engine
 // CALIBRATION (two real anchors, reconciled by a sqrt-IV model):
-//   A1 (historical FinIQ): SNDK 45% put @ strike-IV 90%  -> 20% client coupon
+//   A1 (historical FinIQ): SNDK 45% put @ strike-IV 90%  -> 20% CLIENT coupon @ MB1 (gross 21)
 //   A2 (current market):   SNDK 40% put @ strike-IV 230% -> ~30% client coupon
-// MB = Monetary Benefits = RM commission. Client coupon = gross - MB.
-// Model:  client_coupon_pa = (put%/100) * sqrt(IV_atStrike) * KCAL * freqAdj * basketAdj
-//   sqrt(IV) captures option value scaling with vol without over-shooting at extreme IV.
+// MB = Monetary Benefits = RM commission.
+// GROSS-BASED MODEL (MB feeds through):
+//   gross_pa = (put%/100) * sqrt(IV_atStrike) * KCAL_G * freqAdj * basketAdj
+//   client   = gross - MB          (MB up => client coupon down)
+//   reverse: put% = (client+MB) / (sqrt(IV)*KCAL_G*freq*basket*callAdj)   (MB up => strike up)
+// KCAL_G from A1: gross 21 = 45 * sqrt(0.90) * K  ->  K = 0.4917
 const IV_REF = 0.90;
-const KCAL = 0.20 / (0.45 * Math.sqrt(IV_REF)); // ~0.4683
+const KCAL = 0.21 / (0.45 * Math.sqrt(IV_REF)); // gross-based ~0.4917
 const ivPow = iv => Math.sqrt(Math.max(iv,0.01));
 
 // Call-level adjustment: lower call level -> easier autocall -> issuer takes LESS downside
@@ -51,20 +54,22 @@ function solveParams(p, iv){
   const cAdj = callAdj(p.call);   // lower call -> higher strike
 
   if(!hasPut && !hasCoupon){
-    out.put = 45 * cAdj;
-    out.coupon = +(( (out.put/100) * ivPow(ivK) * KCAL * freqAdj * basketAdj )*100).toFixed(2);
-    out.gross = +(out.coupon + p.mb).toFixed(2);
-    solved={which:"both", note:`預設 put=45% → 用 strike IV ${(ivK*100).toFixed(0)}% 解 client coupon`+basketNote};
+    out.put = +(45 * cAdj).toFixed(2);
+    const gross = (out.put/100) * ivPow(ivK) * KCAL * freqAdj * basketAdj * 100;
+    out.gross = +gross.toFixed(2);
+    out.coupon = +(gross - p.mb).toFixed(2);          // MB ↑ → client coupon ↓
+    solved={which:"both", note:`預設 put=45% → 用 strike IV ${(ivK*100).toFixed(0)}% 解 client coupon（gross ${out.gross}% − MB ${p.mb}%）`+basketNote};
   } else if(!hasCoupon){
-    out.put = p.put * cAdj;
-    out.coupon = +(( (out.put/100) * ivPow(ivK) * KCAL * freqAdj * basketAdj )*100).toFixed(2);
-    out.gross = +(out.coupon + p.mb).toFixed(2);
-    solved={which:"coupon", note:`put ${out.put}% (call ${p.call}%) × √(strike IV ${(ivK*100).toFixed(0)}%) → client coupon`+basketNote};
+    out.put = +(p.put * cAdj).toFixed(2);
+    const gross = (out.put/100) * ivPow(ivK) * KCAL * freqAdj * basketAdj * 100;
+    out.gross = +gross.toFixed(2);
+    out.coupon = +(gross - p.mb).toFixed(2);          // MB ↑ → client coupon ↓
+    solved={which:"coupon", note:`put ${out.put}% (call ${p.call}%) × √(strike IV ${(ivK*100).toFixed(0)}%) → gross ${out.gross}% − MB ${p.mb}% → client coupon`+basketNote};
   } else if(!hasPut){
-    const cp = p.coupon/100;
-    out.put = +(( cp / (ivPow(ivK) * KCAL * freqAdj * basketAdj * cAdj) )*100).toFixed(2);
+    const grossTarget = (p.coupon + p.mb)/100;        // MB ↑ → 需要更高 gross → strike ↑
+    out.put = +(( grossTarget / (ivPow(ivK) * KCAL * freqAdj * basketAdj * cAdj) )*100).toFixed(2);
     out.coupon = p.coupon; out.gross=+(p.coupon+p.mb).toFixed(2);
-    solved={which:"put", note:`client coupon ${p.coupon}% ÷ (√(strike IV ${(ivK*100).toFixed(0)}%) × call ${p.call}% adj) → put/strike`+basketNote};
+    solved={which:"put", note:`(client ${p.coupon}% + MB ${p.mb}%) ÷ (√(strike IV ${(ivK*100).toFixed(0)}%) × call ${p.call}% adj) → put/strike`+basketNote};
   } else {
     out.gross=+(p.coupon+p.mb).toFixed(2);
     solved={which:"none", note:`已全部輸入。Call ${p.call}% / Put ${p.put}%`+basketNote};

@@ -189,8 +189,9 @@ function calibUsBasketPut(syms, clientCoupon, mb, tenor, call){
   const grp=_nearest(rows,tenor,mb);
   const same=rows.filter(r=>r.tenor===grp.tenor&&r.mb===grp.mb);
   const {put,coupon,ref}=_interpByCall(same, call);
-  // small coupon adjustment: +1p put per +2% coupon above quote (worst-of skew)
-  const adj=(clientCoupon-coupon)*0.5;
+  // GROSS-based adjustment: quote gross = coupon+quote.mb; target gross = clientCoupon+mb.
+  // +0.5p put per +1% gross above quote (worst-of skew). MB↑ (same client coupon) → gross↑ → put↑.
+  const adj=((clientCoupon+mb)-(coupon+grp.mb))*0.5;
   return {put:+(put+adj).toFixed(2), quoteCoupon:coupon, tenor:grp.tenor, mb:grp.mb, bank:ref.bank};
 }
 function calibUsBasketCoupon(syms, put, mb, tenor, call){
@@ -198,6 +199,7 @@ function calibUsBasketCoupon(syms, put, mb, tenor, call){
   const grp=_nearest(rows,tenor,mb);
   const same=rows.filter(r=>r.tenor===grp.tenor&&r.mb===grp.mb);
   const {put:qPut,coupon}=_interpByCall(same, call);
-  const c=coupon+(put-qPut)/0.5;
-  return {coupon:+c.toFixed(2), quotePut:qPut, tenor:grp.tenor, mb:grp.mb};
+  // gross from put diff, then client = gross - user mb. MB↑ → client coupon↓.
+  const gross=(coupon+grp.mb)+(put-qPut)/0.5;
+  return {coupon:+(gross-mb).toFixed(2), quotePut:qPut, tenor:grp.tenor, mb:grp.mb};
 }
