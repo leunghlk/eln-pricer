@@ -512,62 +512,101 @@ window.addEventListener("load",init);
 // ---------- Save chart + scenario as JPG (for RM client-facing snapshot) ----------
 function saveSnapshot(){
   const p=readParams();
-  // build a composite: canvas clone of chart area + scenario table + title bar
   const chartCanvas=$("chart").querySelector("canvas");
   if(!chartCanvas){alert("Chart not loaded");return;}
-  const W=1400, H=1000;
+  const W=1400, H=1100;
   const cv=document.createElement("canvas"); cv.width=W; cv.height=H;
   const ctx=cv.getContext("2d");
-  // bg
   ctx.fillStyle="#0a1c38"; ctx.fillRect(0,0,W,H);
+
   // --- title bar ---
-  ctx.fillStyle="#f5c542"; ctx.font="bold 20px Arial"; ctx.textAlign="left";
   const stk=p.basket?BASKET.join(" + "):p.ticker;
   const stkName=p.basket?BASKET.map(tickerName).join(" + "):tickerName(p.ticker);
+  ctx.fillStyle="#f5c542"; ctx.font="bold 20px Arial"; ctx.textAlign="left";
   ctx.fillText(`${stk} (${stkName})`,24,36);
+  // terms: coupon freq + callable freq (or period end); NO lockout
+  const cfreqDisp = {monthly:"Monthly",quarterly:"Quarterly",semi:"Semi-Annual",annual:"Annual"}[p.cfreq]||p.cfreq;
+  const callableTxt = p.callable==="daily" ? `${cfreqDisp} + Daily Close` : `${cfreqDisp} + Period End`;
   ctx.fillStyle="#cfe0ff"; ctx.font="14px Arial";
-  const terms=`Call ${p.call}% · Coupon ${p.coupon||"(solving)"}% p.a. ${p.cfreq} · Callable ${p.callable} · Tenor ${p.tenor}M · ${p.lockout}w no-call`;
+  const cpnStr = p.coupon ? `${p.coupon}% p.a.` : "(solving)";
+  const terms=`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M`;
   ctx.fillText(terms,24,60);
   // --- solve result ---
   ctx.fillStyle="#f5c542"; ctx.font="bold 16px Arial";
-  const putVal=parseFloat($("solveVal").textContent.match(/[\d.]+/)?.[0]||"0");
-  const cpnVal=p.coupon||parseFloat($("solveVal").textContent.match(/[\d.]+/)?.[0]||"0");
-  const solveLine = p.coupon ? `Solve for PUT: ${putVal?putVal+"%":"—"}` : `Solve for COUPON: ${cpnVal?cpnVal+"%":"—"}`;
+  const sv=$("solveVal").textContent;
+  const putMatch=sv.match(/([\d.]+)\s*%/);
+  const solveLine = p.put==null
+    ? `Solve for PUT: ${putMatch?putMatch[1]+"%":"—"}`
+    : `Solve for COUPON: ${putMatch?putMatch[1]+"%":"—"}`;
   ctx.fillText(solveLine,24,84);
-  // --- chart canvas (draw 2 copies: candlesticks) ---
+
+  // --- chart: draw canvas at native resolution (avoid scale distortion) ---
   ctx.fillStyle="#cfe0ff"; ctx.font="bold 13px Arial";
-  ctx.fillText("1 · Candlestick Chart (red up / green down)",24,110);
-  const charts=$("chart").querySelectorAll("canvas");
-  const chY=120;
+  ctx.fillText("1 · Candlestick Chart (red up / green down)",24,108);
+  const charts=[...$("chart").querySelectorAll("canvas")].filter(c=>c.width>100); // skip tiny tooltip canvases
+  const chY=118, chH=380;
   if(charts.length===1){
-    ctx.drawImage(charts[0],24,chY,W-48,400);
+    // draw at canvas's own width/height ratio, fit into target box
+    const src=charts[0];
+    const sW=src.width, sH=src.height;
+    const tgtW=W-48, tgtH=chH;
+    const scale=Math.min(tgtW/sW, tgtH/sH);
+    const dw=sW*scale, dh=sH*scale;
+    ctx.drawImage(src,24,chY+(tgtH-dh)/2,dw,dh);
   } else {
-    // basket: draw each sub-chart canvas
-    const cw=Math.floor((W-60)/charts.length);
-    charts.forEach((c,i)=>ctx.drawImage(c,30+i*cw,chY,cw-6,400));
+    const n=charts.length;
+    const gap=8;
+    const slotW=Math.floor((W-48-gap*(n-1))/n);
+    charts.forEach((src,i)=>{
+      const sW=src.width, sH=src.height;
+      const scale=Math.min(slotW/sW, chH/sH);
+      const dw=sW*scale, dh=sH*scale;
+      const dx=24+i*(slotW+gap)+(slotW-dw)/2;
+      ctx.drawImage(src,dx,chY+(chH-dh)/2,dw,dh);
+    });
   }
+
   // --- scenario table ---
-  const scnY=540;
+  const scnY=520;
   ctx.fillStyle="#cfe0ff"; ctx.font="bold 13px Arial";
   ctx.fillText("2 · Scenario Analysis (estimated)",24,scnY);
-  // parse scenario table from DOM
   const rows=[...document.querySelectorAll("#scnTable tr")];
   let ty=scnY+24;
-  const colW=[200,100,180,260,200];
-  const colX=[24,224,324,504,764];
-  rows.forEach((r,ri)=>{
+  const colX=[24,210,300,470,740,980];
+  const colMaxW=[180,84,164,264,230,380];
+  rows.forEach(r=>{
     const cells=[...r.querySelectorAll("th,td")];
     cells.forEach((cell,ci)=>{
-      if(ci>=colW.length)return;
+      if(ci>=colX.length)return;
       const isHdr=cell.tagName==="TH";
       ctx.fillStyle=isHdr?"#f5c542":"#cfe0ff";
       ctx.font=isHdr?"bold 12px Arial":"12px Arial";
       ctx.textAlign="left";
-      const txt=cell.innerText.replace(/\n/g," ").trim();
-      ctx.fillText(txt.slice(0,30),colX[ci],ty);
+      const txt=cell.innerText.replace(/\n/g," ").trim().slice(0,40);
+      ctx.fillText(txt,colX[ci],ty);
     });
     ty+=22;
   });
+  // --- coupon & observation arrangement text ---
+  ty+=8;
+  ctx.fillStyle="#f5c542"; ctx.font="bold 12px Arial";
+  ctx.fillText("Coupon & Observation Arrangement:",24,ty); ty+=20;
+  ctx.fillStyle="#cfe0ff"; ctx.font="12px Arial";
+  const perCpn = p.notional * ( (p.coupon||0)/100 ) * (1/{monthly:12,quarterly:4,semi:2,annual:1}[p.cfreq]||12);
+  const totalCpn = p.notional * ( (p.coupon||0)/100 ) * (p.tenor/12);
+  const obsTxt = p.callable==="daily"
+    ? `${cfreqDisp} coupon ${p.ccy} ${perCpn.toFixed(0)} (${p.coupon||0}% p.a.), total max ${p.ccy} ${totalCpn.toFixed(0)}; Daily close observation after 1-month no-call period.`
+    : `${cfreqDisp} coupon ${p.ccy} ${perCpn.toFixed(0)} (${p.coupon||0}% p.a.); Period-end observation.`;
+  // word-wrap
+  wrapText(ctx,obsTxt,24,ty,W-48,18); ty+=36;
+  // delivery detail
+  const putPx = CUR.spot ? (CUR.spot * (CUR.put/100)) : null;
+  if(putPx){
+    const deliv=`Physical delivery at strike ${CUR.put}% if triggered (${p.ccy} ${putPx.toFixed(2)} per share).`;
+    ctx.fillStyle="#90a8d0";
+    wrapText(ctx,deliv,24,ty,W-48,16);
+  }
+
   // --- footnote ---
   ctx.fillStyle="#7090c0"; ctx.font="11px Arial";
   ctx.fillText(`Generated ${new Date().toISOString().slice(0,10)} · ELN Pricer · Indicative only, not a guarantee of return.`,24,H-20);
@@ -579,4 +618,15 @@ function saveSnapshot(){
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },"image/jpeg",0.92);
+}
+// simple word-wrap for canvas text
+function wrapText(ctx,text,x,y,maxW,lh){
+  const words=text.split(" "); let line="";
+  for(let i=0;i<words.length;i++){
+    const test=line+words[i]+" ";
+    if(ctx.measureText(test).width>maxW && i>0){
+      ctx.fillText(line.trim(),x,y); y+=lh; line=words[i]+" ";
+    } else line=test;
+  }
+  ctx.fillText(line.trim(),x,y);
 }
