@@ -60,7 +60,20 @@ function renderChart(data){
       grid:{vertLines:{color:"#13294d"},horzLines:{color:"#13294d"}},
       rightPriceScale:{borderColor:"#1d3a66"},timeScale:{borderColor:"#1d3a66"},crosshair:{mode:1}});
     SERIES=CHART.addCandlestickSeries({upColor:"rgba(226,59,59,0)",downColor:"#1faa59",
-      borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59"});
+      borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59",
+      autoscaleInfoProvider:orig=>{
+        const r=orig&&orig();
+        if(!r||!CUR.spot)return r;
+        const lvls=[];
+        if(CUR.call)lvls.push(CUR.spot*CUR.call/100);
+        if(CUR.put)lvls.push(CUR.spot*CUR.put/100);
+        if(!lvls.length)return r;
+        let lo=r.priceRange?r.priceRange.minValue:Math.min(...lvls);
+        let hi=r.priceRange?r.priceRange.maxValue:Math.max(...lvls);
+        lvls.forEach(v=>{lo=Math.min(lo,v);hi=Math.max(hi,v);});
+        const pad=(hi-lo)*0.05||hi*0.05;
+        return {priceRange:{minValue:lo-pad,maxValue:hi+pad}};
+      }});
     // hollow bull = transparent body + red border; filled bear = green body
     CHART.subscribeCrosshairMove(onHover);
   }
@@ -91,6 +104,8 @@ function drawLevels(){
     axisLabelVisible:true,title:`Call ${CUR.call}%`});
   PUT_LINE=SERIES.createPriceLine({price:CUR.spot*CUR.put/100,color:"#e23b3b",lineWidth:2,lineStyle:2,
     axisLabelVisible:true,title:`Put ${CUR.put}%`});
+  // force y-axis to recompute so deep-OTM put line stays visible
+  try{CHART.priceScale("right").applyOptions({autoScale:true});}catch(e){}
 }
 
 async function loadIV(){
