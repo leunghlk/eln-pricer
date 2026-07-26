@@ -48,7 +48,7 @@ async function runAll(){
   recompute();
 }
 
-// ---------- chart (single + basket dual) ----------
+// ---------- chart (single + basket dual/triple) ----------
 async function loadChart(range){
   const p=readParams();
   const tickers = (p.basket && BASKET.length>=2) ? BASKET : [p.ticker];
@@ -63,32 +63,20 @@ function newChart(el){
     grid:{vertLines:{color:"#13294d"},horzLines:{color:"#13294d"}},
     rightPriceScale:{borderColor:"#1d3a66"},timeScale:{borderColor:"#1d3a66"},crosshair:{mode:1}});
   const series=chart.addCandlestickSeries({upColor:"rgba(226,59,59,0)",downColor:"#1faa59",
-    borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59",
-    autoscaleInfoProvider:orig=>{
-      const r=orig&&orig();
-      if(!r||!CUR.spot)return r;
-      const lvls=[];
-      if(CUR.call)lvls.push(CUR.spot*CUR.call/100);
-      if(CUR.put)lvls.push(CUR.spot*CUR.put/100);
-      if(!lvls.length)return r;
-      let lo=r.priceRange?r.priceRange.minValue:Math.min(...lvls);
-      let hi=r.priceRange?r.priceRange.maxValue:Math.max(...lvls);
-      lvls.forEach(v=>{lo=Math.min(lo,v);hi=Math.max(hi,v);});
-      const pad=(hi-lo)*0.05||hi*0.05;
-      return {priceRange:{minValue:lo-pad,maxValue:hi+pad}};
-    }});
+    borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59"});
+  const maSeries=chart.addLineSeries({color:"#f5c542",lineWidth:2,priceLineVisible:false,lastValueVisible:true,
+    title:"MA"});
   chart.subscribeCrosshairMove(param=>onHover(param,series,el));
-  return {chart,series,_call:null,_put:null,_sma:null};
+  return {chart,series,maSeries,_call:null,_put:null,_spot:0};
 }
 
 function renderCharts(tickers, all){
   const wrap=$("chart");
-  // rebuild containers
   CHARTS.forEach(c=>{try{c.chart.remove();}catch(e){}});
   CHARTS=[];
   wrap.innerHTML="";
-  const isBasket = tickers.length>=2;
-  wrap.style.gridTemplateColumns = isBasket ? "1fr 1fr" : "1fr";
+  const n=tickers.length;
+  wrap.style.gridTemplateColumns = n>=3 ? "1fr 1fr 1fr" : (n===2 ? "1fr 1fr" : "1fr");
   tickers.forEach((t,i)=>{
     const box=document.createElement("div");box.className="subchart";
     const cap=document.createElement("div");cap.className="subcap";
@@ -99,6 +87,7 @@ function renderCharts(tickers, all){
     const el=document.createElement("div");el.className="subel";el.style.height="300px";
     box.appendChild(cap);box.appendChild(el);wrap.appendChild(box);
     const c=newChart(el);
+    c._spot = all[i].data.length ? all[i].data[all[i].data.length-1].close : 0;
     c.series.setData(all[i].data);
     c.chart.timeScale().fitContent();
     CHARTS.push(c);
@@ -122,28 +111,32 @@ function onHover(param,series,el){
   tt.style.left=x+"px"; tt.style.top=y+"px";
 }
 
+// per-chart call/put lines using EACH chart's own spot (fixes scale mismatch)
 function drawLevelsAll(){ CHARTS.forEach(drawLevelsOn); }
 function drawLevelsOn(c){
   if(!c||!c.chart)return;
   if(c._call)c.series.removePriceLine(c._call);
   if(c._put)c.series.removePriceLine(c._put);
-  if(!CUR.spot||!CUR.call||!CUR.put)return;
-  c._call=c.series.createPriceLine({price:CUR.spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
-  c._put =c.series.createPriceLine({price:CUR.spot*CUR.put/100,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
-  try{c.chart.priceScale("right").applyOptions({autoScale:true});}catch(e){}
+  if(!c._spot||!CUR.call||!CUR.put)return;
+  c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
+  c._put =c.series.createPriceLine({price:c._spot*CUR.put/100,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
 }
 
+// REAL moving average as a line series (not a flat price line)
 function applySMAAll(){ CHARTS.forEach(applySMAOn); }
 function applySMAOn(c){
   if(!c||!c.chart)return;
-  if(c._sma)c.series.removePriceLine(c._sma);c._sma=null;
+  c.maSeries.setData([]);
   if(!SMA_ON)return;
   SMA_N=+$("smaN").value||10;
   const ds=c.series.data(); if(!ds||ds.length<SMA_N)return;
   const vals=ds.map(d=>d.close);
-  const sma=vals.map((_,i)=>{if(i<SMA_N-1)return null;let s=0;for(let k=0;k<SMA_N;k++)s+=vals[i-k];return {time:ds[i].time,value:+(s/SMA_N).toFixed(2)};}).filter(Boolean);
-  if(!sma.length)return;
-  c._sma=c.series.createPriceLine({price:sma[sma.length-1].value,color:"#f5c542",lineWidth:2,lineStyle:0,axisLabelVisible:true,title:`MA${SMA_N}`});
+  const maData=ds.map((d,i)=>{
+    if(i<SMA_N-1)return null;
+    let s=0;for(let k=0;k<SMA_N;k++)s+=vals[i-k];
+    return {time:d.time,value:+(s/SMA_N).toFixed(2)};
+  }).filter(Boolean);
+  if(maData.length)c.maSeries.setData(maData);
 }
 
 // ---------- IV ----------
@@ -173,13 +166,22 @@ function renderBanks(iv){
       +`${iv.source==='live'?('live · '+ (iv.expiry||'')):'sample (seeded)'}</div>`;
     box.appendChild(el);
   });
-  $("ivNote").innerHTML = iv.source==="live"
-    ? (LANG==="en"
-        ? `✅ Real Option IV (auto-updated via Yahoo) · ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}. Bank rows are indicative (spread-adjusted).`
-        : `✅ 真實 Option IV（Yahoo，自動更新）· ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}。`)
-    : (LANG==="en"
-        ? `⚠ Live IV unavailable (HK stock or rate-limit); showing <b>sample</b>. Refer to bank indicative for actual terms.`
-        : `⚠ 真實 IV 暫取不到（HK 股或 rate-limit），顯示 <b>sample</b>。實盤以銀行 indicative 為準。`);
+  const atm=pct(iv.atm*100,1), stk=pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0), stkiv=pct(iv.atStrike*100,1), exp=iv.expiry||"";
+  let note;
+  if(iv.source==="live"){
+    note = (LANG==="en")
+      ? `✅ Real Option IV (auto-updated via Yahoo) · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b> · expiry ${exp}. Bank rows are indicative (spread-adjusted).`
+      : (LANG==="sc")
+      ? `✅ 真实 Option IV（自动更新）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b> · 到期 ${exp}。各行均为按惯例 spread 调整的 indicative。`
+      : `✅ 真實 Option IV（自動更新）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b> · 到期 ${exp}。各行均為按慣例 spread 調整之 indicative。`;
+  } else {
+    note = (LANG==="en")
+      ? `⚠ Live IV unavailable (HK stock or rate-limit); showing <b>sample</b>. Refer to bank indicative for actual terms.`
+      : (LANG==="sc")
+      ? `⚠ 真实 IV 暂取不到（港股或 rate-limit），显示 <b>sample</b>。实际以银行 indicative 为准。`
+      : `⚠ 真實 IV 暫取不到（港股或 rate-limit），顯示 <b>sample</b>。實盤以銀行 indicative 為準。`;
+  }
+  $("ivNote").innerHTML = note;
 }
 
 // ---------- recompute (live IV priority for single stock) ----------
