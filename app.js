@@ -21,8 +21,14 @@ function applyLang(){
 }
 
 function readParams(){
+  const single = !$("basketPane").style.display || $("basketPane").style.display==="none";
+  let basket=[];
+  if(!single){
+    [ "bk1","bk2","bk3" ].forEach(id=>{ const v=$(""+id).value.trim(); if(v) basket.push(v.toUpperCase()); });
+  }
   return {
-    ticker:$("ticker").value, basket:$("basketOn").checked,
+    ticker:$("ticker").value, basket:!single && basket.length>=2,
+    basketList:basket,
     tenor:+$("tenor").value, issue:$("issue").value, lockout:+$("lockout").value,
     call:+$("call").value, mb:+$("mb").value,
     callable:$("callable").value, cfreq:$("cfreq").value,
@@ -168,13 +174,18 @@ function renderBanks(iv){
     box.appendChild(el);
   });
   $("ivNote").innerHTML = iv.source==="live"
-    ? `✅ 真實 Option IV（Yahoo，自動更新）· ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}。`
-    : `⚠ 真實 IV 暫取不到（HK 股或 rate-limit），顯示 <b>sample</b>。實盤以銀行 indicative 為準。`;
+    ? (LANG==="en"
+        ? `✅ Real Option IV (auto-updated via Yahoo) · ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}. Bank rows are indicative (spread-adjusted).`
+        : `✅ 真實 Option IV（Yahoo，自動更新）· ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}。`)
+    : (LANG==="en"
+        ? `⚠ Live IV unavailable (HK stock or rate-limit); showing <b>sample</b>. Refer to bank indicative for actual terms.`
+        : `⚠ 真實 IV 暫取不到（HK 股或 rate-limit），顯示 <b>sample</b>。實盤以銀行 indicative 為準。`);
 }
 
 // ---------- recompute (live IV priority for single stock) ----------
 function recompute(){
   const p=readParams();
+  if(p.basket) BASKET=p.basketList.slice();
   if(p.basket && BASKET_IV.length>=2) p.basket=BASKET_IV;
 
   // Determine default coupon (for solve card / defaults) — live IV model
@@ -212,7 +223,7 @@ function recompute(){
   if(calibHit){
     out={...p,coupon:calibHit.coupon,put:calibHit.put,gross:+(calibHit.coupon+p.mb).toFixed(2),basketAdj:1};
     solved={which:(hasCoupon&&!hasPut)?"put":(hasPut&&!hasCoupon)?"coupon":"both",
-      note:`${T("srcReal")} <b>${calibHit.src}</b> · ${T("cCoupon")} ${pct(calibHit.coupon)} · ${T("cPut")} ${pct(calibHit.put)}`};
+      note:`${T("cCoupon")} ${pct(calibHit.coupon)} · ${T("cPut")} ${pct(calibHit.put)}`};
   } else {
     // live IV model (US single primary; also HK fallback)
     const r=solveParams(p,LAST_IV); out=r.out; solved=r.solved;
@@ -287,30 +298,26 @@ function renderScenarios(S,p,out){
   $("scnDetail").innerHTML=html;
 }
 
-// ---- basket UI ----
-function buildBasketChips(){
-  const box=$("basketChips");box.innerHTML="";
-  UNIVERSE.forEach(u=>{const c=document.createElement("span");c.className="chip";c.textContent=u[0];
-    c.onclick=()=>{const i=BASKET.indexOf(u[0]);
-      if(i>=0)BASKET.splice(i,1);else if(BASKET.length<4)BASKET.push(u[0]);
-      c.classList.toggle("sel");};
-    box.appendChild(c);});
-}
-
 // ---- init ----
 function init(){
   const dl=$("tickers");UNIVERSE.forEach(u=>{const o=document.createElement("option");o.value=u[0];o.label=u[2];dl.appendChild(o);});
-  buildBasketChips();
   applyLang();
+  // tab switching
+  document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
+    const mode=t.dataset.mode;
+    document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));
+    $("singlePane").style.display = mode==="single"?"block":"none";
+    $("basketPane").style.display = mode==="basket"?"block":"none";
+    if(CUR.spot)runAll();
+  });
   document.querySelectorAll(".langsw button").forEach(b=>b.onclick=()=>{LANG=b.dataset.l;localStorage.setItem("eln_lang",LANG);applyLang();});
   $("run").onclick=runAll;
   $("reset").onclick=()=>location.reload();
-  $("basketOn").onchange=e=>$("basketBox").classList.toggle("on",e.target.checked);
   document.querySelectorAll(".toolbar [data-r]").forEach(b=>b.onclick=()=>loadChart(b.dataset.r).then(recompute));
   $("smaOn").onchange=e=>{SMA_ON=e.target.checked;applySMAAll();};
   $("smaN").onchange=()=>{ if(SMA_ON)applySMAAll(); };
   $("refresh").onclick=()=>runAll();
-  ["call","mb","coupon","put","cfreq","callable","tenor","notional","lockout","issue"].forEach(id=>
+  ["call","mb","coupon","put","cfreq","callable","tenor","notional","lockout","issue","bk1","bk2","bk3"].forEach(id=>
     $(id).addEventListener("input",()=>{if(CUR.spot)recompute();}));
   $("issue").value=new Date().toISOString().slice(0,10);
   setTimeout(runAll,300);
