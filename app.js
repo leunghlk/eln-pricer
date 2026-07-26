@@ -136,7 +136,7 @@ function renderBanks(iv){
     box.appendChild(el);
   });
   $("ivNote").innerHTML = iv.source==="live"
-    ? `✅ 真實 option IV（marketdata.app）· ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}。5 行為按慣例 spread 調整之 indicative。`
+    ? `✅ 真實 option IV（Yahoo，自動更新）· ATM ≈ <b>${pct(iv.atm*100,1)}</b> · strike(${pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0)}) IV ≈ <b>${pct(iv.atStrike*100,1)}</b> · expiry ${iv.expiry}。5 行為按慣例 spread 調整之 indicative。`
     : `⚠ 真實 IV 暫取不到（HK 股或 rate-limit），顯示 <b>sample</b>。實盤以銀行 indicative 為準。`;
 }
 
@@ -170,10 +170,10 @@ function recompute(){
   if(calibHit){
     out={...p,coupon:calibHit.coupon,put:calibHit.put,gross:+(calibHit.coupon+p.mb).toFixed(2),basketAdj:1};
     solved={which:(hasCoupon&&!hasPut)?"put":(hasPut&&!hasCoupon)?"coupon":"both",
-      note:`✅ 用真實 <b>${calibHit.src}</b>：client coupon ${pct(calibHit.coupon)} · put/strike ${pct(calibHit.put)} · MB ${pct(p.mb)}（gross ${pct(calibHit.coupon+p.mb)}）`};
+      note:`${T("srcReal")} <b>${calibHit.src}</b> · ${T("cCoupon")} ${pct(calibHit.coupon)} · ${T("cPut")} ${pct(calibHit.put)}`};
   } else {
     const r=solveParams(p,LAST_IV); out=r.out; solved=r.solved;
-    solved.note="⚠ 無 FinIQ 校準點，用 IV 估算（僅參考）：<br>"+solved.note;
+    solved.note=T("srcEst")+"<br>"+solved.note;
   }
   // solve card
   const sc=$("solveCard");sc.style.display="block";
@@ -183,7 +183,7 @@ function recompute(){
   else if(solved.which==="put"){title="Put / Strike Level %";val=pct(out.put);}
   else{title="✓ 全部輸入（gross check）";val=`gross ${pct(out.gross)}`;}
   $("solveLbl").textContent=title;$("solveVal").textContent=val;
-  $("solveNote").innerHTML=solved.note+`<br><span style="color:#9fb3d1">gross coupon ${pct(out.gross)} = client ${pct(out.coupon)} + MB ${pct(p.mb)}（你食 ${sym(p.ccy)}${fmt(p.notional*p.mb/100,0)}/期年化按名義）</span>`;
+  $("solveNote").innerHTML=solved.note;
   // chart lines
   CUR.call=p.call;CUR.put=out.put;
   drawLevels();
@@ -196,26 +196,52 @@ function renderScenarios(S,p,out){
   const cpA=out.coupon/100;
   const rows=[
     {t:T("sc1"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.cpnByFirstObs,0),
-     prin:"本金 100% 退回",ret:"+"+pct(cpA*(S.firstObsMonths/12)*100),cls:"good"},
-    {t:T("sc2"),called:T("yes"),cpn:"累計至 call 月",
-     prin:"本金 100% 退回",ret:"+已累計 coupon",cls:"good"},
+     prin:T("prinBack"),ret:"+"+pct(cpA*(S.firstObsMonths/12)*100),cls:"good"},
+    {t:T("sc2"),called:T("yes"),cpn:T("cpnAccrued"),
+     prin:T("prinBack"),ret:"+"+T("cpnAccrued"),cls:"good"},
     {t:T("sc3"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.totalCpnIfHeld,0),
-     prin:"本金 100% 退回",ret:"+"+pct(cpA*(p.tenor/12)*100),cls:"good"},
+     prin:T("prinBack"),ret:"+"+pct(cpA*(p.tenor/12)*100),cls:"good"},
     {t:T("sc4"),called:T("no"),cpn:sym(p.ccy)+fmt(S.totalCpnIfHeld,0),
-     prin:`接 ${fmt(S.shares,2)} 股 @ ${sym(p.ccy)}${fmt(S.strikePx,2)}（strike ${pct(out.put)}）`,
-     ret:"股價<strike 即虧損（本金受險）",cls:"bad"}
+     prin:T("takeDelivery"),
+     ret:T("belowStrikeLoss"),cls:"bad"}
   ];
   rows.forEach(r=>{const tr=document.createElement("tr");if(r.cls==="good")tr.className="hi";
     tr.innerHTML=`<td class="scn"><span class="t">${r.t}</span></td><td>${r.called}</td>`
       +`<td class="num">${r.cpn}</td><td>${r.prin}</td>`
       +`<td class="scn"><span class="${r.cls}">${r.ret}</span></td>`;
     tb.appendChild(tr);});
-  $("scnDetail").innerHTML=
-    `📋 每期 coupon = <b>${sym(p.ccy)}${fmt(S.perCpn,0)}</b>（client ${pct(out.coupon)} p.a. ÷ ${p.cfreq}）· 全期最高 = <b>${sym(p.ccy)}${fmt(S.totalCpnIfHeld,0)}</b><br>`
-    +`💰 你嘅 MB = <b>${pct(p.mb)}</b> → gross coupon ${pct(out.gross)}<br>`
-    +`📉 接貨：strike ${pct(out.put)} = ${sym(p.ccy)}${fmt(S.strikePx,2)} → 每 ${sym(p.ccy)}${fmt(p.notional,0)} 收 ${fmt(S.shares,2)} 股；股價低於 strike 部分為客戶虧損。`
-    +(p.callable==="daily"?`<br>🔁 Daily close：lock-out ${S.firstObsMonths} 個月後每日觀察，全部股 ≥ call 即收回。`
-      :`<br>🔁 Period end：每期期末先觀察一次。`);
+
+  // ---- detail block (client-facing, formal, NO MB) ----
+  const strikePx=S.strikePx, shares=S.shares;
+  const notional=p.notional, ccy=sym(p.ccy);
+  // worst-of delivery details
+  let worstName=p.ticker;
+  if(p.basket && BASKET.length>=2) worstName=T("worstPerformer");
+  // fee assumption 0.25% brokerage on delivery (typical)
+  const feeRate=0.0025;
+  const deliveryVal=shares*strikePx;
+  const fee=deliveryVal*feeRate;
+  const wholeShares=Math.floor(shares);
+  const fracCash=(shares-wholeShares)*strikePx;
+  const remainCash=fracCash - fee;   // odd-lot fractional returned as cash, less fee
+
+  let html=`<div class="scnhead">${T("scnDetailTitle")}</div>`;
+  html+=`<p>${T("perCpnLine")}：<b>${ccy}${fmt(S.perCpn,0)}</b>（${T("cCoupon")} ${pct(out.coupon)} p.a.）· ${T("maxTotalLine")}：<b>${ccy}${fmt(S.totalCpnIfHeld,0)}</b></p>`;
+  html+=`<p>${T("obsLine")}：${p.callable==="daily"
+      ? T("dailyObs").replace("{m}",S.firstObsMonths)
+      : T("periodObs")}</p>`;
+  html+=`<div class="scnhead2">${T("deliveryTitle")}</div>`;
+  html+=`<p>${T("deliveryDesc")
+      .replace("{worst}",`<b>${worstName}</b>`)
+      .replace("{strikePct}",pct(out.put))
+      .replace("{strikePx}",`${ccy}${fmt(strikePx,2)}`)
+      .replace("{notional}",`${ccy}${fmt(notional,0)}`)
+      .replace("{shares}",`<b>${fmt(wholeShares,0)}</b>`)}</p>`;
+  html+=`<p>${T("deliveryCash")
+      .replace("{fee}",`${ccy}${fmt(fee,2)}`)
+      .replace("{cash}",`<b>${ccy}${fmt(Math.max(0,remainCash),2)}</b>`)}</p>`;
+  html+=`<p class="warn">${T("deliveryRisk")}</p>`;
+  $("scnDetail").innerHTML=html;
 }
 
 // ---- basket UI ----

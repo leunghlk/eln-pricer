@@ -41,35 +41,39 @@ function tickerName(input){
   return u?u[2]:"(自訂 ticker)";
 }
 
-// ---- CONFIG: data provider keys (Twelve Data native CORS for candles) ----
-const TD_KEY = "ff430ea8397d4163995861d40bf28314";  // Twelve Data (美股真實 K 線；港股需付費 plan)
-const FINNHUB_KEY = "d9iu7nhr01qvkt7ea1l0d9iu7nhr01qvkt7ea1lg"; // 即時報價用
+// ---- CONFIG: data providers ----
+// 你自己嘅 Cloudflare Worker proxy：統一 source（美股+港股 K 線 + 自動 option IV）
+const WORKER_URL = "https://eln-proxy.leunghlk.workers.dev";
+const TD_KEY = "ff430ea8397d4163995861d40bf28314";  // Twelve Data 後備（美股）
+const FINNHUB_KEY = "d9iu7nhr01qvkt7ea1l0d9iu7nhr01qvkt7ea1lg"; // 即時報價後備
 
-// ---- CANDLES (Twelve Data primary → Finnhub US quote spot → sample) ----
+// ---- CANDLES (Worker/Yahoo primary → Twelve Data → sample) ----
 async function fetchCandles(input, range){
   const y=usSym(input);
   const days = range==="3mo"?66:range==="6mo"?132:252;
-  // Twelve Data: US uses bare symbol; HK uses number + exchange=HKEX
-  let tdSymbol=y, tdExtra="";
-  if(isHK(y)){ tdSymbol=y.replace(/\.HK$/i,"").replace(/^0+/,""); tdExtra="&exchange=HKEX"; }
+  const yr = range==="3mo"?"3mo":range==="6mo"?"6mo":"1y";
+  // 1) Worker proxy → Yahoo（美股+港股統一，有 CORS）
   try{
+    const url=`${WORKER_URL}/chart?symbol=${encodeURIComponent(y)}&range=${yr}&interval=1d`;
+    const r=await fetch(url); const j=await r.json();
+    const res=j&&j.chart&&j.chart.result&&j.chart.result[0];
+    if(res&&res.timestamp){
+      const q=res.indicators.quote[0];
+      const out=res.timestamp.map((t,i)=>({time:isoFromUnix(t),open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i]}))
+        .filter(d=>d.open!=null&&d.close!=null);
+      if(out.length) return {data:out, source:"live", provider:"Yahoo (proxy)"};
+    }
+  }catch(e){}
+  // 2) Twelve Data 後備（美股）
+  try{
+    let tdSymbol=y, tdExtra="";
+    if(isHK(y)){ tdSymbol=y.replace(/\.HK$/i,"").replace(/^0+/,""); tdExtra="&exchange=HKEX"; }
     const url=`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(tdSymbol)}${tdExtra}&interval=1day&outputsize=${days}&apikey=${TD_KEY}`;
     const r=await fetch(url); const j=await r.json();
     if(j.status!=="error" && Array.isArray(j.values) && j.values.length){
-      const out=j.values.map(v=>({time:v.datetime,open:+v.open,high:+v.high,low:+v.low,close:+v.close}))
-        .reverse();
+      const out=j.values.map(v=>({time:v.datetime,open:+v.open,high:+v.high,low:+v.low,close:+v.close})).reverse();
       return {data:out, source:"live", provider:"Twelve Data"};
     }
-  }catch(e){}
-  // Yahoo fallback (works on residential IP / your Mac; may be CORS-blocked when hosted)
-  try{
-    const yr = range==="3mo"?"3mo":range==="6mo"?"6mo":"1y";
-    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${y}?range=${yr}&interval=1d`;
-    const r=await fetch(url); const j=await r.json(); const res=j.chart.result[0];
-    const q=res.indicators.quote[0];
-    const out=res.timestamp.map((t,i)=>({time:isoFromUnix(t),open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i]}))
-      .filter(d=>d.open!=null&&d.close!=null);
-    if(out.length) return {data:out, source:"live", provider:"Yahoo"};
   }catch(e){}
   return {data:sampleCandles(days), source:"sample", provider:"sample"};
 }
@@ -84,42 +88,53 @@ function sampleCandles(days){
   return arr;
 }
 
-// ---- OPTION IV (at target strike + ATM) ----
-// Returns {atm, atStrike, spot, source, expiry}
+// ---- OPTION IV (at target strike + ATM) via Worker → Yahoo option chain ----
+// Returns {atm, atStrike, spot, source, expiry, strikeUsed}
+// 自動攞即時 IV：唔使再手動抄數據（解決效率問題）
 async function fetchIV(input, tenorMonths, strikePct){
   const y=usSym(input);
-  if(!isHK(y)){
-    try{
-      // nearest expiry >= tenor
-      const exp=await fetch(`https://api.marketdata.app/v1/options/expirations/${y}/`);
-      const ej=await exp.json();
-      if(ej.s==="ok" && ej.expirations && ej.expirations.length){
-        const targetDte=tenorMonths*30;
-        const now=Math.floor(Date.now()/1000);
-        let best=ej.expirations[0], bestDiff=1e9;
-        ej.expirations.forEach(ds=>{
-          const t=Math.floor(new Date(ds+"T00:00:00Z").getTime()/1000);
-          const dte=(t-now)/86400; const diff=Math.abs(dte-targetDte);
-          if(dte>5 && diff<bestDiff){bestDiff=diff;best=ds;}
+  try{
+    // 1) 攞到期日列表（default chain 已含最近到期）
+    const r0=await fetch(`${WORKER_URL}/options?symbol=${encodeURIComponent(y)}`);
+    const j0=await r0.json();
+    const res0=j0&&j0.optionChain&&j0.optionChain.result&&j0.optionChain.result[0];
+    if(res0){
+      const exps=res0.expirationDates||[];
+      const spot=res0.quote&&(res0.quote.regularMarketPrice||res0.quote.postMarketPrice);
+      // 揀最接近 tenor 嘅到期日
+      const now=Math.floor(Date.now()/1000);
+      const targetDte=tenorMonths*30;
+      let best=null,bestDiff=1e9;
+      exps.forEach(t=>{const dte=(t-now)/86400;const diff=Math.abs(dte-targetDte);
+        if(dte>3&&diff<bestDiff){bestDiff=diff;best=t;}});
+      // 攞該到期日 chain
+      let chain=res0;
+      if(best && exps.length){
+        const r1=await fetch(`${WORKER_URL}/options?symbol=${encodeURIComponent(y)}&date=${best}`);
+        const j1=await r1.json();
+        chain=(j1&&j1.optionChain&&j1.optionChain.result&&j1.optionChain.result[0])||res0;
+      }
+      const opt=chain.options&&chain.options[0];
+      const puts=(opt&&opt.puts)||[];
+      const sp=spot||(chain.quote&&chain.quote.regularMarketPrice);
+      if(puts.length&&sp){
+        const kTarget=sp*(strikePct/100);
+        let iAtm=-1,iK=-1,dA=1e9,dK=1e9;
+        puts.forEach((p,i)=>{
+          if(p.impliedVolatility==null||!p.strike)return;
+          if(Math.abs(p.strike-sp)<dA){dA=Math.abs(p.strike-sp);iAtm=i;}
+          if(Math.abs(p.strike-kTarget)<dK){dK=Math.abs(p.strike-kTarget);iK=i;}
         });
-        const ch=await fetch(`https://api.marketdata.app/v1/options/chain/${y}/?expiration=${best}&side=put`);
-        const cj=await ch.json();
-        if(cj.s==="ok" && cj.strike && cj.strike.length){
-          const spot=cj.underlyingPrice[0];
-          // ATM = strike closest to spot; atStrike = closest to spot*strikePct
-          let iAtm=0,iK=0,dA=1e9,dK=1e9;
-          const kTarget=spot*(strikePct/100);
-          cj.strike.forEach((s,i)=>{
-            if(cj.iv[i]==null)return;
-            if(Math.abs(s-spot)<dA){dA=Math.abs(s-spot);iAtm=i;}
-            if(Math.abs(s-kTarget)<dK){dK=Math.abs(s-kTarget);iK=i;}
-          });
-          return {atm:cj.iv[iAtm], atStrike:cj.iv[iK], spot, source:"live", expiry:best,
-                  strikeUsed:cj.strike[iK]};
+        if(iAtm>=0){
+          const expDate=new Date((opt.expirationDate||best)*1000).toISOString().slice(0,10);
+          return {atm:puts[iAtm].impliedVolatility,
+                  atStrike:iK>=0?puts[iK].impliedVolatility:puts[iAtm].impliedVolatility,
+                  spot:sp, source:"live", expiry:expDate,
+                  strikeUsed:iK>=0?puts[iK].strike:puts[iAtm].strike};
         }
       }
-    }catch(e){}
-  }
+    }
+  }catch(e){}
   // no live IV → seeded sample by sector vol
   const seed = 0.42 + Math.random()*0.15;
   return {atm:seed, atStrike:seed*1.35, spot:null, source:"sample", expiry:null, strikeUsed:null};
