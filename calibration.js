@@ -33,7 +33,28 @@ const CALIB = {
   // 港股 basket MB 敏感度（由 3690+992: MB1→MB2 @10% = 64→71 推算）≈ 7p / 1% MB
   hk_basket_mb_slope: 7,
   // 港股 basket coupon 敏感度（10%→12% = +2p over 2% = 1p / 1%）
-  hk_basket_cpn_slope: 1
+  hk_basket_cpn_slope: 1,
+
+  // ---- 美股 basket (worst-of) 真實報價記錄 ----
+  // key = 成分股 sorted join "+"；array of {tenor(月), call%, mb%, coupon%, put%}
+  us_basket: {
+    "DELL+SNDK": [
+      {tenor:2, call:100, mb:3, coupon:18, put:51},
+      {tenor:2, call:90,  mb:3, coupon:18, put:51},
+      {tenor:2, call:80,  mb:3, coupon:18, put:51},
+      {tenor:2, call:70,  mb:3, coupon:18, put:54}
+    ],
+    "INTC+SNDK": [
+      {tenor:2, call:100, mb:3, coupon:18, put:55},
+      {tenor:2, call:90,  mb:3, coupon:18, put:54},
+      {tenor:2, call:80,  mb:3, coupon:18, put:55},
+      {tenor:2, call:70,  mb:3, coupon:18, put:58}
+    ],
+    "AMAT+SNDK": [
+      {tenor:24, call:95.5, mb:4.5, coupon:25, put:55.5,  bank:"UBS"},
+      {tenor:24, call:95,   mb:5,   coupon:25, put:57.24, bank:"UBS"}
+    ]
+  }
 };
 
 // ---- helpers ----
@@ -95,4 +116,44 @@ function calibHkBasketCoupon(syms, put, mb){
     return +(c0+(c1-c0)*(p-base[c0])/(base[c1]-base[c0])).toFixed(2);
   }
   return +(cs[0]+(p-base[cs[0]])/CALIB.hk_basket_cpn_slope).toFixed(2);
+}
+
+// ---- US basket (worst-of): match nearest real quote by tenor+mb, interp on call ----
+function _usBasketRow(syms){ return CALIB.us_basket[basketKey(syms)]||null; }
+function _nearest(rows, tenor, mb){
+  // rank by |tenor diff| then |mb diff|
+  return rows.slice().sort((a,b)=>
+    (Math.abs(a.tenor-tenor)-Math.abs(b.tenor-tenor))||
+    (Math.abs(a.mb-mb)-Math.abs(b.mb-mb)))[0];
+}
+function _interpByCall(rows, call){
+  // rows share tenor/mb group; interpolate put on call level
+  const ex=rows.find(r=>Math.abs(r.call-call)<0.01);
+  if(ex)return {put:ex.put, coupon:ex.coupon, ref:ex};
+  const sorted=rows.slice().sort((a,b)=>a.call-b.call);
+  const lo=sorted.filter(r=>r.call<=call).pop();
+  const hi=sorted.find(r=>r.call>=call);
+  if(lo&&hi&&lo!==hi){
+    const f=(call-lo.call)/(hi.call-lo.call);
+    return {put:+(lo.put+(hi.put-lo.put)*f).toFixed(2), coupon:lo.coupon, ref:lo};
+  }
+  const one=lo||hi||sorted[0];
+  return {put:one.put, coupon:one.coupon, ref:one};
+}
+function calibUsBasketPut(syms, clientCoupon, mb, tenor, call){
+  const rows=_usBasketRow(syms); if(!rows)return null;
+  const grp=_nearest(rows,tenor,mb);
+  const same=rows.filter(r=>r.tenor===grp.tenor&&r.mb===grp.mb);
+  const {put,coupon,ref}=_interpByCall(same, call);
+  // small coupon adjustment: +1p put per +2% coupon above quote (worst-of skew)
+  const adj=(clientCoupon-coupon)*0.5;
+  return {put:+(put+adj).toFixed(2), quoteCoupon:coupon, tenor:grp.tenor, mb:grp.mb, bank:ref.bank};
+}
+function calibUsBasketCoupon(syms, put, mb, tenor, call){
+  const rows=_usBasketRow(syms); if(!rows)return null;
+  const grp=_nearest(rows,tenor,mb);
+  const same=rows.filter(r=>r.tenor===grp.tenor&&r.mb===grp.mb);
+  const {put:qPut,coupon}=_interpByCall(same, call);
+  const c=coupon+(put-qPut)/0.5;
+  return {coupon:+c.toFixed(2), quotePut:qPut, tenor:grp.tenor, mb:grp.mb};
 }

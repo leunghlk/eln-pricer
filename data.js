@@ -42,7 +42,7 @@ function tickerName(input){
 }
 
 // ---- CONFIG: data provider keys (Twelve Data native CORS for candles) ----
-const TD_KEY = "demo";          // ← 換成你自己嘅免費 Twelve Data key（HK 股需要）
+const TD_KEY = "ff430ea8397d4163995861d40bf28314";  // Twelve Data (美股真實 K 線；港股需付費 plan)
 const FINNHUB_KEY = "d9iu7nhr01qvkt7ea1l0d9iu7nhr01qvkt7ea1lg"; // 即時報價用
 
 // ---- CANDLES (Twelve Data primary → Finnhub US quote spot → sample) ----
