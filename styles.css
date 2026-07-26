@@ -80,16 +80,8 @@ tr.hi{background:rgba(240,192,64,.07)}
 .chartlegend .sma{display:inline-flex;align-items:center;gap:5px}
 .chartlegend .sma select{width:auto;padding:2px 6px;font-size:12px}
 /* number input spinners: white arrows on dark bg.
-   color-scheme:dark tells the browser to render native controls (incl. spin arrows) light.
-   appearance:none + explicit webkit pseudo style as fallback. */
-input[type=number]{color-scheme:dark;-moz-appearance:textfield;appearance:none}
-input[type=number]::-webkit-inner-spin-button,
-input[type=number]::-webkit-outer-spin-button{
-  -webkit-appearance:inner-spin-button;-moz-appearance:inner-spin-button;
-  appearance:inner-spin-button;
-  filter:invert(1) brightness(1.6);opacity:1;cursor:pointer}
-input[type=number]::-webkit-inner-spin-button:hover,
-input[type=number]::-webkit-outer-spin-button:hover{filter:invert(1) brightness(2)}
+   color-scheme:dark alone tells Chrome/Safari/Firefox to render native spin buttons light. */
+input[type=number]{color-scheme:dark}
 .hl{color:var(--gold)}
 .bank.drv{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
 .cht-tt{position:absolute;z-index:30;background:#102a52ee;border:1px solid var(--gold);border-radius:8px;

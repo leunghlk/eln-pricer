@@ -77,7 +77,7 @@ function newChart(el){
   const chart=LightweightCharts.createChart(el,{
     layout:{background:{color:"#0a1c38"},textColor:"#cfe0ff"},
     grid:{vertLines:{color:"#13294d"},horzLines:{color:"#13294d"}},
-    rightPriceScale:{borderColor:"#1d3a66"},timeScale:{borderColor:"#1d3a66"},crosshair:{mode:1}});
+    rightPriceScale:{borderColor:"#1d3a66"},timeScale:{borderColor:"#1d3a66",rightOffset:0,fixLeftEdge:false},crosshair:{mode:1}});
   const series=chart.addCandlestickSeries({upColor:"rgba(226,59,59,0)",downColor:"#1faa59",
     borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59"});
   const maSeries=chart.addLineSeries({color:"#f5c542",lineWidth:2,priceLineVisible:false,lastValueVisible:true,
@@ -110,6 +110,7 @@ function renderCharts(tickers, all){
     c._tt = tt; c._lvlNote = lvlNote; c._data = all[i].data;
     c.series.setData(all[i].data);
     c.chart.timeScale().fitContent();
+    c.chart.timeScale().scrollToRealTime();   // 最後一支燭貼右邊，唔好被 whitespace 切走（否則看似停喺前一交易日）
     CHARTS.push(c);
   });
   drawLevelsAll();
@@ -499,11 +500,83 @@ function init(){
   $("smaOn").onchange=e=>{SMA_ON=e.target.checked;applySMAAll();};
   $("smaN").onchange=()=>{ if(SMA_ON)applySMAAll(); };
   $("refresh").onclick=()=>runAll();
+  $("saveJpg").onclick=()=>saveSnapshot();
   ["call","mb","coupon","put","cfreq","callable","tenor","notional","lockout","issue","bk1","bk2","bk3"].forEach(id=>
     $(id).addEventListener("input",()=>{if(CUR.spot)recompute();}));
   $("issue").value=new Date().toISOString().slice(0,10);
-  // default demo state: put=45 filled so initial auto-run passes validation
-  if($("coupon").value===""&&$("put").value==="")$("put").value=45;
+  // coupon defaults to 10 (from HTML value); put left blank (no default fill)
   setTimeout(runAll,300);
 }
 window.addEventListener("load",init);
+
+// ---------- Save chart + scenario as JPG (for RM client-facing snapshot) ----------
+function saveSnapshot(){
+  const p=readParams();
+  // build a composite: canvas clone of chart area + scenario table + title bar
+  const chartCanvas=$("chart").querySelector("canvas");
+  if(!chartCanvas){alert("Chart not loaded");return;}
+  const W=1400, H=1000;
+  const cv=document.createElement("canvas"); cv.width=W; cv.height=H;
+  const ctx=cv.getContext("2d");
+  // bg
+  ctx.fillStyle="#0a1c38"; ctx.fillRect(0,0,W,H);
+  // --- title bar ---
+  ctx.fillStyle="#f5c542"; ctx.font="bold 20px Arial"; ctx.textAlign="left";
+  const stk=p.basket?BASKET.join(" + "):p.ticker;
+  const stkName=p.basket?BASKET.map(tickerName).join(" + "):tickerName(p.ticker);
+  ctx.fillText(`${stk} (${stkName})`,24,36);
+  ctx.fillStyle="#cfe0ff"; ctx.font="14px Arial";
+  const terms=`Call ${p.call}% · Coupon ${p.coupon||"(solving)"}% p.a. ${p.cfreq} · Callable ${p.callable} · Tenor ${p.tenor}M · ${p.lockout}w no-call`;
+  ctx.fillText(terms,24,60);
+  // --- solve result ---
+  ctx.fillStyle="#f5c542"; ctx.font="bold 16px Arial";
+  const putVal=parseFloat($("solveVal").textContent.match(/[\d.]+/)?.[0]||"0");
+  const cpnVal=p.coupon||parseFloat($("solveVal").textContent.match(/[\d.]+/)?.[0]||"0");
+  const solveLine = p.coupon ? `Solve for PUT: ${putVal?putVal+"%":"—"}` : `Solve for COUPON: ${cpnVal?cpnVal+"%":"—"}`;
+  ctx.fillText(solveLine,24,84);
+  // --- chart canvas (draw 2 copies: candlesticks) ---
+  ctx.fillStyle="#cfe0ff"; ctx.font="bold 13px Arial";
+  ctx.fillText("1 · Candlestick Chart (red up / green down)",24,110);
+  const charts=$("chart").querySelectorAll("canvas");
+  const chY=120;
+  if(charts.length===1){
+    ctx.drawImage(charts[0],24,chY,W-48,400);
+  } else {
+    // basket: draw each sub-chart canvas
+    const cw=Math.floor((W-60)/charts.length);
+    charts.forEach((c,i)=>ctx.drawImage(c,30+i*cw,chY,cw-6,400));
+  }
+  // --- scenario table ---
+  const scnY=540;
+  ctx.fillStyle="#cfe0ff"; ctx.font="bold 13px Arial";
+  ctx.fillText("2 · Scenario Analysis (estimated)",24,scnY);
+  // parse scenario table from DOM
+  const rows=[...document.querySelectorAll("#scnTable tr")];
+  let ty=scnY+24;
+  const colW=[200,100,180,260,200];
+  const colX=[24,224,324,504,764];
+  rows.forEach((r,ri)=>{
+    const cells=[...r.querySelectorAll("th,td")];
+    cells.forEach((cell,ci)=>{
+      if(ci>=colW.length)return;
+      const isHdr=cell.tagName==="TH";
+      ctx.fillStyle=isHdr?"#f5c542":"#cfe0ff";
+      ctx.font=isHdr?"bold 12px Arial":"12px Arial";
+      ctx.textAlign="left";
+      const txt=cell.innerText.replace(/\n/g," ").trim();
+      ctx.fillText(txt.slice(0,30),colX[ci],ty);
+    });
+    ty+=22;
+  });
+  // --- footnote ---
+  ctx.fillStyle="#7090c0"; ctx.font="11px Arial";
+  ctx.fillText(`Generated ${new Date().toISOString().slice(0,10)} · ELN Pricer · Indicative only, not a guarantee of return.`,24,H-20);
+  // download
+  cv.toBlob(blob=>{
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=`ELN_${stk}_${new Date().toISOString().slice(0,10)}.jpg`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },"image/jpeg",0.92);
+}
