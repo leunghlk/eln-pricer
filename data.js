@@ -41,33 +41,37 @@ function tickerName(input){
   return u?u[2]:"(自訂 ticker)";
 }
 
-// ---- CANDLES ----
+// ---- CONFIG: data provider keys (Twelve Data native CORS for candles) ----
+const TD_KEY = "demo";          // ← 換成你自己嘅免費 Twelve Data key（HK 股需要）
+const FINNHUB_KEY = "d9iu7nhr01qvkt7ea1l0d9iu7nhr01qvkt7ea1lg"; // 即時報價用
+
+// ---- CANDLES (Twelve Data primary → Finnhub US quote spot → sample) ----
 async function fetchCandles(input, range){
   const y=usSym(input);
   const days = range==="3mo"?66:range==="6mo"?132:252;
-  if(!isHK(y)){
-    try{
-      const url=`https://api.marketdata.app/v1/stocks/candles/D/${y}/?countback=${days}`;
-      const r=await fetch(url); if(!r.ok) throw 0;
-      const j=await r.json();
-      if(j.s==="ok" && j.c && j.c.length){
-        const out=j.t.map((t,i)=>({time:isoFromUnix(t),open:j.o[i],high:j.h[i],low:j.l[i],close:j.c[i]}));
-        return {data:out, source:"live"};
-      }
-    }catch(e){}
-  }
-  // Yahoo fallback (works on residential IP)
+  // Twelve Data: US uses bare symbol; HK uses number + exchange=HKEX
+  let tdSymbol=y, tdExtra="";
+  if(isHK(y)){ tdSymbol=y.replace(/\.HK$/i,"").replace(/^0+/,""); tdExtra="&exchange=HKEX"; }
+  try{
+    const url=`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(tdSymbol)}${tdExtra}&interval=1day&outputsize=${days}&apikey=${TD_KEY}`;
+    const r=await fetch(url); const j=await r.json();
+    if(j.status!=="error" && Array.isArray(j.values) && j.values.length){
+      const out=j.values.map(v=>({time:v.datetime,open:+v.open,high:+v.high,low:+v.low,close:+v.close}))
+        .reverse();
+      return {data:out, source:"live", provider:"Twelve Data"};
+    }
+  }catch(e){}
+  // Yahoo fallback (works on residential IP / your Mac; may be CORS-blocked when hosted)
   try{
     const yr = range==="3mo"?"3mo":range==="6mo"?"6mo":"1y";
     const url=`https://query1.finance.yahoo.com/v8/finance/chart/${y}?range=${yr}&interval=1d`;
-    const r=await fetch(url); if(!r.ok) throw 0;
-    const j=await r.json(); const res=j.chart.result[0];
+    const r=await fetch(url); const j=await r.json(); const res=j.chart.result[0];
     const q=res.indicators.quote[0];
     const out=res.timestamp.map((t,i)=>({time:isoFromUnix(t),open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i]}))
       .filter(d=>d.open!=null&&d.close!=null);
-    return {data:out, source:"live"};
+    if(out.length) return {data:out, source:"live", provider:"Yahoo"};
   }catch(e){}
-  return {data:sampleCandles(days), source:"sample"};
+  return {data:sampleCandles(days), source:"sample", provider:"sample"};
 }
 function isoFromUnix(u){return new Date(u*1000).toISOString().slice(0,10);}
 function sampleCandles(days){

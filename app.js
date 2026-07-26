@@ -44,11 +44,13 @@ async function runAll(){
 async function loadChart(range){
   $("chartErr").style.display="none";
   const p=readParams();
-  const {data,source}=await fetchCandles(p.ticker,range);
+  const {data,source,provider}=await fetchCandles(p.ticker,range);
   CUR.spot=data.length?data[data.length-1].close:0;
   renderChart(data);
   if(source==="sample"){$("chartErr").style.display="block";
-    $("chartErr").innerHTML='<span style="color:#ffb454">[SAMPLE 數據 — 真實報價暫取不到]</span>';}
+    $("chartErr").innerHTML='<span style="color:#ffb454">[SAMPLE 假數據 — 真實報價取不到，可能係 HK 股要 Twelve Data key，或 CORS 阻擋]</span>';}
+  else{$("chartErr").style.display="block";
+    $("chartErr").innerHTML=`<span style="color:#37d67a">● 真實數據：${provider}</span>`;}
 }
 
 function renderChart(data){
@@ -126,7 +128,30 @@ function renderBanks(iv){
 function recompute(){
   const p=readParams();
   if(p.basket && BASKET_IV.length>=2) p.basket=BASKET_IV;
-  const {out,solved}=solveParams(p,LAST_IV);
+  // ---- PREFER real FinIQ calibration table ----
+  let calibHit=null;
+  const hasCoupon=p.coupon!=null&&p.coupon!==""&&!isNaN(p.coupon);
+  const hasPut=p.put!=null&&p.put!==""&&!isNaN(p.put);
+  try{
+    if(p.basket && BASKET.length>=2){
+      if(!hasPut && hasCoupon){const v=calibHkBasketPut(BASKET,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ basket table"};}
+      else if(!hasCoupon && hasPut){const v=calibHkBasketCoupon(BASKET,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ basket table"};}
+      else if(!hasCoupon && !hasPut){const v=calibHkBasketPut(BASKET,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ basket table (預設10%)"};}
+    } else {
+      if(!hasPut && hasCoupon){const v=calibUsPut(p.ticker,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ single-stock table"};}
+      else if(!hasCoupon && hasPut){const v=calibUsCoupon(p.ticker,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ single-stock table"};}
+      else if(!hasCoupon && !hasPut){const v=calibUsPut(p.ticker,8,p.mb); if(v!=null)calibHit={put:v,coupon:8,src:"FinIQ single-stock table (預設8%)"};}
+    }
+  }catch(e){}
+  let out,solved;
+  if(calibHit){
+    out={...p,coupon:calibHit.coupon,put:calibHit.put,gross:+(calibHit.coupon+p.mb).toFixed(2),basketAdj:1};
+    solved={which:(hasCoupon&&!hasPut)?"put":(hasPut&&!hasCoupon)?"coupon":"both",
+      note:`✅ 用真實 <b>${calibHit.src}</b>：client coupon ${pct(calibHit.coupon)} · put/strike ${pct(calibHit.put)} · MB ${pct(p.mb)}（gross ${pct(calibHit.coupon+p.mb)}）`};
+  } else {
+    const r=solveParams(p,LAST_IV); out=r.out; solved=r.solved;
+    solved.note="⚠ 無 FinIQ 校準點，用 IV 估算（僅參考）：<br>"+solved.note;
+  }
   // solve card
   const sc=$("solveCard");sc.style.display="block";
   let title,val;
