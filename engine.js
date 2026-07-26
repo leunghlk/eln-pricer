@@ -13,10 +13,10 @@ const KCAL = 0.21 / (0.45 * Math.sqrt(IV_REF)); // gross-based ~0.4917
 const ivPow = iv => Math.sqrt(Math.max(iv,0.01));
 
 // Call-level adjustment: lower call level -> easier autocall -> issuer takes LESS downside
-// -> HIGHER strike (lower coupon). Calibrated to real FinIQ basket table
-// (SNDK+INTC: 90c=54, 80c=55, 70c=58; 100c slightly lower).
-// 90c is the base (=1.0).
-const CALL_ADJ = {100:0.98, 90:1.0, 80:1.018, 70:1.074};
+// -> HIGHER strike (lower coupon). Calibrated to real FinIQ tables:
+//   SNDK+DELL: 100c=51 = 90c=51 (flat), 70c=54; DELL single: 100c=49p = 90c=49p (user-confirmed)
+// So 100c ≈ 90c (1.0), curve only steepens below 80c.
+const CALL_ADJ = {100:1.0, 90:1.0, 80:1.018, 70:1.074};
 function callAdj(call){
   const cs=Object.keys(CALL_ADJ).map(Number).sort((a,b)=>a-b);
   if(call>=cs[cs.length-1]) return CALL_ADJ[cs[cs.length-1]];

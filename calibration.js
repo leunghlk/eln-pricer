@@ -129,10 +129,12 @@ function calibHkSinglePut(stock, clientCoupon, mb){
                  + (mb-mbRef)*CALIB.hk_single_mb_slope;
   return +put.toFixed(2);
 }
-function calibHkSingleCoupon(stock, put){
+function calibHkSingleCoupon(stock, put, mb){
   const s=normSym(stock); const ref=CALIB.hk_single_ref[s];
   if(ref==null) return null;
-  return +(8 + (put-ref)/CALIB.hk_single_cpn_slope).toFixed(2);
+  // reverse of calibHkSinglePut: strip MB effect first, then coupon slope
+  const m=(mb==null?1:mb);
+  return +(8 + (put - ref - (m-1)*CALIB.hk_single_mb_slope)/CALIB.hk_single_cpn_slope).toFixed(2);
 }
 
 // ---- HK basket DERIVED from single table (covers ALL combinations) ----

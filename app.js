@@ -311,15 +311,66 @@ function recompute(){
           if(v==null)v=calibHkBasketDerivedPut(BASKET,10,p.mb);
           if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK basket (預設10%)"};
         }
+        // HK basket with unknown component — never fall through to the US IV model
+        const allHkNum = BASKET.every(s=>/^\d+$/.test(String(s).replace(/\.HK$/i,"").trim()));
+        if(!calibHit && allHkNum){
+          const m={tc:`籃子內有成分股未有校準報價（現有單頭：992/9992/9988/3690/1211/9999/700/5/2388），暫未能定價。請先加入該股之 FinIQ 真實報價。`,
+                   sc:`篮子内有成分股未有校准报价，暂未能定价。请先加入该股之 FinIQ 真实报价。`,
+                   en:`A basket component has no calibration quote — cannot price. Please add a real FinIQ quote for it first.`};
+          $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+          return;
+        }
       }
     } else if(isHK(usSym(p.ticker))) {
-      // HK single — calibration table only
+      // HK single — calibration table ONLY (HK vol low; US IV model must NEVER price HK)
       if(!hasPut && hasCoupon){const v=calibHkSinglePut(p.ticker,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ HK single table"};}
-      else if(!hasCoupon && hasPut){const v=calibHkSingleCoupon(p.ticker,p.put); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK single table"};}
+      else if(!hasCoupon && hasPut){const v=calibHkSingleCoupon(p.ticker,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK single table"};}
       else if(!hasCoupon && !hasPut){const v=calibHkSinglePut(p.ticker,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK single (預設10%)"};}
+      if(!calibHit){
+        // unknown HK stock — refuse to fake a number with the US IV model
+        const m={tc:`0${p.ticker} 未有校準報價，暫未能定價。請先於 FinIQ 取一個真實報價加入校準表（現有：992/9992/9988/3690/1211/9999/700/5/2388）。`,
+                 sc:`0${p.ticker} 未有校准报价，暂未能定价。请先于 FinIQ 取一个真实报价加入校准表。`,
+                 en:`No calibration quote for ${p.ticker}.HK — cannot price. Please add a real FinIQ quote to the calibration table first.`};
+        $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+        return;
+      }
     }
-    // US single: NOT using static table (IV volatile) → fall through to live IV model
+    else {
+      // ---- US single: REAL FinIQ table PRIMARY (gross+call adjusted) ----
+      // live IV model only for stocks NOT in the table
+      const cA=callAdj(p.call);
+      if(!hasPut && hasCoupon){
+        const v=calibUsPut(p.ticker,p.coupon,p.mb);
+        if(v!=null)calibHit={put:+(v*cA).toFixed(2),coupon:p.coupon,src:"FinIQ US single table"};
+      } else if(!hasCoupon && hasPut){
+        const v=calibUsCoupon(p.ticker,p.put/cA,p.mb);
+        if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ US single table"};
+      } else if(!hasCoupon && !hasPut){
+        const v=calibUsPut(p.ticker,8,p.mb);
+        if(v!=null)calibHit={put:+(v*cA).toFixed(2),coupon:8,src:"FinIQ US single (預設8%)"};
+      }
+      // not in table → fall through to live IV model (solveParams)
+    }
   }catch(e){}
+
+  // ---- HK sanity cap: HK singles/baskets never price below 50% strike ----
+  if(calibHit){
+    const hkDeal = (p.basket && BASKET.length>=2 && BASKET.every(s=>/^\d+$/.test(String(s).replace(/\.HK$/i,"").trim())))
+                 || (!p.basket && isHK(usSym(p.ticker)));
+    if(hkDeal && calibHit.put!=null && calibHit.put<50){
+      const m={tc:`⚠ 此條款組合超出港股常見範圍（計得 strike ${calibHit.put}% < 50%）。港股單頭 8–10% coupon 一般為 6x–9x 折。請調低 coupon 或 MB。`,
+               sc:`⚠ 此条款组合超出港股常见范围（计得 strike ${calibHit.put}% < 50%）。请调低 coupon 或 MB。`,
+               en:`⚠ Terms outside normal HK range (computed strike ${calibHit.put}% < 50%). Lower the coupon or MB.`};
+      $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+    }
+    if(calibHit.put!=null && calibHit.put>95){
+      const m={tc:`⚠ 計得 strike ${calibHit.put}% 已高於 95%——此 coupon/MB 組合對該股而言過高（vol 不足以支持），實盤多數做唔到。請調低 coupon 或 MB。`,
+               sc:`⚠ 计得 strike ${calibHit.put}% 已高于 95%——此 coupon/MB 组合过高，实盘多数做不到。请调低 coupon 或 MB。`,
+               en:`⚠ Computed strike ${calibHit.put}% exceeds 95% — this coupon/MB combination is too rich for this stock's vol; unlikely to be dealable. Lower the coupon or MB.`};
+      $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+      calibHit.put=Math.min(calibHit.put,99);
+    }
+  }
 
   let out,solved;
   if(calibHit){

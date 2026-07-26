@@ -27,14 +27,23 @@ const UNIVERSE = [
   ["700","0700.HK","Tencent Holdings"],
   ["9988","9988.HK","Alibaba Group"],
   ["3690","3690.HK","Meituan"],
-  ["388","0388.HK","Hong Kong Exchanges (HKEX)"]
+  ["388","0388.HK","Hong Kong Exchanges (HKEX)"],
+  ["5","0005.HK","HSBC Holdings 滙豐控股"],
+  ["9999","9999.HK","NetEase 網易"],
+  ["1211","1211.HK","BYD 比亞迪"],
+  ["2388","2388.HK","BOC Hong Kong 中銀香港"],
+  ["9618","9618.HK","JD.com 京東"],
+  ["1347","1347.HK","Hua Hong Semi 華虹半導體"]
 ];
 // HK tickers marketdata.app doesn't cover free → force Yahoo/sample
 const isHK = y => /\.HK$/i.test(y);
 function usSym(input){
   const t=(input||"").trim().toUpperCase();
   const u=UNIVERSE.find(x=>x[0].toUpperCase()===t||x[1]===t);
-  return u?u[1]:t;
+  if(u) return u[1];
+  // pure digits = HK stock code → normalize to Yahoo 4-digit .HK
+  if(/^\d{1,5}$/.test(t)) return (t.length<4?t.padStart(4,"0"):t)+".HK";
+  return t;
 }
 function tickerName(input){
   const y=usSym(input); const u=UNIVERSE.find(x=>x[1]===y);
