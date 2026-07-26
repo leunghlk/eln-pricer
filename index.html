@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ELN Pricer</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header>
+  <h1 data-i="title">ELN Pricer</h1>
+  <span class="sub" data-i="sub"></span>
+  <span class="spacer"></span>
+  <div class="langsw">
+    <button data-l="tc" class="on">繁</button>
+    <button data-l="sc">简</button>
+    <button data-l="en">EN</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- LEFT -->
+  <div>
+    <div class="card">
+      <h2 data-i="p_params"></h2>
+      <div class="tabrow">
+        <button class="tab on" data-mode="single" id="tabSingle">Single</button>
+        <button class="tab" data-mode="basket" id="tabBasket">Basket (worst-of)</button>
+      </div>
+
+      <div id="singlePane">
+        <label data-i="p_ticker"></label>
+        <input id="ticker" list="tickers" value="SNDK">
+        <datalist id="tickers"></datalist>
+        <div class="ticker-tag" id="tickerName"></div>
+      </div>
+
+      <div id="basketPane" style="display:none">
+        <div style="font-size:12px;color:var(--muted)" data-i="p_basketpick"></div>
+        <label>Underlying 1</label><input id="bk1" list="tickers" value="">
+        <label>Underlying 2</label><input id="bk2" list="tickers" value="">
+        <label>Underlying 3（optional）</label><input id="bk3" list="tickers" value="">
+      </div>
+
+      <div class="dual">
+        <div><label data-i="p_tenor"></label><input id="tenor" type="number" min="1" max="24" value="3"></div>
+        <div><label data-i="p_lockout"></label><input id="lockout" type="number" min="0" max="12" value="1"></div>
+      </div>
+      <div class="dual">
+        <div><label data-i="p_issue"></label><input id="issue" type="date"></div>
+        <div><label data-i="p_settle"></label><input value="T+1 week" disabled></div>
+      </div>
+      <div class="dual">
+        <div><label data-i="p_call"></label><input id="call" type="number" step="0.5" value="90"></div>
+        <div><label data-i="p_mb"></label><input id="mb" type="number" step="0.1" min="1" max="5" value="1"></div>
+      </div>
+
+      <label data-i="p_callable"></label>
+      <select id="callable">
+        <option value="daily" data-i="p_daily"></option>
+        <option value="period" data-i="p_period"></option>
+      </select>
+      <label data-i="p_cfreq"></label>
+      <select id="cfreq">
+        <option value="monthly" data-i="p_monthly"></option>
+        <option value="quarterly" data-i="p_quarterly"></option>
+        <option value="semi" data-i="p_semi"></option>
+        <option value="annual" data-i="p_annual"></option>
+      </select>
+
+      <div class="dual">
+        <div><label data-i="p_notional"></label><input id="notional" type="number" step="1000" value="500000"></div>
+        <div><label data-i="p_ccy"></label>
+          <select id="ccy"><option>USD</option><option>HKD</option><option>EUR</option></select></div>
+      </div>
+
+      <label style="margin-top:14px;color:var(--gold)" data-i="p_solvehdr"></label>
+      <div class="dual">
+        <div><label data-i="p_coupon"></label><input id="coupon" type="number" step="0.1" placeholder="20"></div>
+        <div><label data-i="p_put"></label><input id="put" type="number" step="0.5" placeholder="45"></div>
+      </div>
+      <div class="chk"><input type="checkbox" id="useiv" checked><label style="margin:0" data-i="p_useiv"></label></div>
+
+      <button class="btn" id="run" data-i="p_gen"></button>
+      <button class="btn ghost" id="reset" data-i="p_reset"></button>
+      <div class="err" id="err"></div>
+    </div>
+
+    <div class="card" id="solveCard" style="display:none">
+      <h2 data-i="s_hdr"></h2>
+      <div class="solvebox">
+        <div class="lbl" id="solveLbl"></div>
+        <div class="val" id="solveVal"></div>
+        <div class="note" id="solveNote"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div>
+    <div class="card">
+      <h2 data-i="c_hdr"></h2>
+      <div class="toolbar">
+        <button class="btn ghost" data-r="3mo">3M</button>
+        <button class="btn ghost" data-r="6mo">6M</button>
+        <button class="btn ghost" data-r="1y">1Y</button>
+        <button class="btn ghost" data-r="3y">3Y</button>
+        <button class="btn ghost" data-r="5y">5Y</button>
+        <button class="btn ghost" data-r="10y">10Y</button>
+        <button class="btn ghost" id="refresh">↻</button>
+      </div>
+      <div class="chartwrap" id="chart"><div id="tooltip"></div></div>
+      <div class="chartlegend">
+        <span class="pill call" data-i="c_call"></span>
+        <span class="pill put" data-i="c_put"></span>
+        <span class="sma"><label><input type="checkbox" id="smaOn"> <span data-i="c_sma"></span></label>
+          <select id="smaN"><option value="10">MA10</option><option value="20">MA20</option><option value="50">MA50</option></select></span>
+        <span>🖱 <span data-i="c_hover"></span></span>
+      </div>
+      <div class="err" id="chartErr"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i="sc_hdr"></h2>
+      <table>
+        <thead><tr>
+          <th data-i="sc_col1"></th><th data-i="sc_col2"></th><th data-i="sc_col3"></th>
+          <th data-i="sc_col4"></th><th data-i="sc_col5"></th>
+        </tr></thead>
+        <tbody id="scnBody"></tbody>
+      </table>
+      <div class="scn" id="scnDetail" style="margin-top:12px;font-size:12.5px"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i="iv_hdr"></h2>
+      <div class="banks" id="banks"></div>
+      <div class="ivnote" id="ivNote"></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer" data-i="disc"></div>
+<div class="msg" id="msg"></div>
+
+<script src="i18n.js?v=14"></script>
+<script src="calibration.js?v=14"></script>
+<script src="data.js?v=14"></script>
+<script src="engine.js?v=14"></script>
+<script src="app.js?v=14"></script>
+</body>
+</html>
