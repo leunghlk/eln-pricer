@@ -541,35 +541,36 @@ function saveSnapshot(){
   ctx.fillText(solveLine,24,84);
 
   // --- chart: draw ONLY the main candlestick canvas (skip price/time axis canvases) ---
+  // lightweight-charts canvases all have default 300x150 buffer but CSS-resized via offsetWidth.
+  // Use offsetWidth/Height as the true visible size and resize canvas buffer before drawing.
   ctx.fillStyle="#cfe0ff"; ctx.font="bold 13px Arial";
   ctx.fillText("1 · Candlestick Chart (red up / green down)",24,108);
-  // lightweight-charts creates multiple canvases per chart (main + price axis + time axis).
-  // Only grab the large main ones (width>500), and group by subchart container.
   const subcharts=[...document.querySelectorAll("#chart .subchart")];
   const chY=118, chH=380;
+  function drawChartCanvas(srcCanvas,dstX,dstW){
+    const w=srcCanvas.offsetWidth||300, h=srcCanvas.offsetHeight||150;
+    // temporarily resize buffer to match visible size for crisp capture
+    const tmp=document.createElement("canvas"); tmp.width=w; tmp.height=h;
+    const tctx=tmp.getContext("2d");
+    tctx.drawImage(srcCanvas,0,0,w,h);
+    const scale=Math.min(dstW/w, chH/h);
+    const dw=w*scale, dh=h*scale;
+    ctx.drawImage(tmp,dstX+(dstW-dw)/2,chY+(chH-dh)/2,dw,dh);
+  }
   if(subcharts.length<=1){
-    // single: grab the single main canvas
-    const main=[...document.querySelectorAll("#chart canvas")].filter(c=>c.width>500).sort((a,b)=>b.width*b.height-a.width*a.height)[0];
-    if(main){
-      const sW=main.width, sH=main.height;
-      const scale=Math.min((W-48)/sW, chH/sH);
-      const dw=sW*scale, dh=sH*scale;
-      ctx.drawImage(main,24,chY+(chH-dh)/2,dw,dh);
-    }
+    // single: grab the largest visible canvas inside #chart
+    const mains=[...document.querySelectorAll("#chart canvas")].filter(c=>(c.offsetWidth||0)>200);
+    const main=mains.sort((a,b)=>(b.offsetWidth||0)*(b.offsetHeight||0)-(a.offsetWidth||0)*(a.offsetHeight||0))[0];
+    if(main) drawChartCanvas(main,24,W-48);
   } else {
     // basket: grab main canvas from each subchart
     const n=subcharts.length;
     const gap=8;
     const slotW=Math.floor((W-48-gap*(n-1))/n);
     subcharts.forEach((sc,i)=>{
-      const main=[...sc.querySelectorAll("canvas")].filter(c=>c.width>200).sort((a,b)=>b.width*b.height-a.width*a.height)[0];
-      if(main){
-        const sW=main.width, sH=main.height;
-        const scale=Math.min(slotW/sW, chH/sH);
-        const dw=sW*scale, dh=sH*scale;
-        const dx=24+i*(slotW+gap)+(slotW-dw)/2;
-        ctx.drawImage(main,dx,chY+(chH-dh)/2,dw,dh);
-      }
+      const mains=[...sc.querySelectorAll("canvas")].filter(c=>(c.offsetWidth||0)>100);
+      const main=mains.sort((a,b)=>(b.offsetWidth||0)*(b.offsetHeight||0)-(a.offsetWidth||0)*(a.offsetHeight||0))[0];
+      if(main) drawChartCanvas(main,24+i*(slotW+gap),slotW);
     });
   }
 
