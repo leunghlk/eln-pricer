@@ -42,13 +42,12 @@ async function runAll(){
   $("err").style.display="none";
   const p=readParams();
   if(!p.tenor||p.tenor<1){$("err").style.display="block";$("err").textContent="Tenor ≥ 1";return;}
-  // Solve-target validation: exactly ONE of coupon / put must be blank
+  // Solve-target validation: exactly ONE of coupon / put must be blank (red text, no popup)
   const hasC=p.coupon!=null, hasP=p.put!=null;
   if(!hasC && !hasP){
     const m={tc:"請輸入 Client Coupon 或 Put/Strike 其中一項（留空另一項，系統自動求解）。",
              sc:"请输入 Client Coupon 或 Put/Strike 其中一项（留空另一项，系统自动求解）。",
              en:"Please enter EITHER Client Coupon OR Put/Strike (leave the other blank to auto-solve)."};
-    alert(m[LANG]||m.tc);
     $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
     return;
   }
@@ -56,7 +55,6 @@ async function runAll(){
     const m={tc:"Coupon 同 Put/Strike 只可填一項，另一項留空由系統求解。請清走其中一個。",
              sc:"Coupon 与 Put/Strike 只可填一项，另一项留空由系统求解。请清除其中一个。",
              en:"Fill in ONLY ONE of Coupon / Put-Strike — the other must stay blank for the solver. Please clear one."};
-    alert(m[LANG]||m.tc);
     $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
     return;
   }
@@ -144,7 +142,7 @@ function drawLevelsOn(c){
   const putPx=c._spot*CUR.put/100;
   c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
   c._put =c.series.createPriceLine({price:putPx,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
-  // "put level ≈ 幾耐之前嘅水平" — most recent date price traded at/below put level
+  // Put level ≈ historical level note (formal, localized)
   if(c._lvlNote){
     const ds=c._data||[];
     let hit=null;
@@ -152,10 +150,21 @@ function drawLevelsOn(c){
     if(hit){
       const dHit=new Date(hit.time), now=new Date();
       const months=Math.max(0,Math.round((now-dHit)/(30.44*864e5)));
-      const ago = months>=12 ? `${(months/12).toFixed(1)} 年前` : `${months} 個月前`;
-      c._lvlNote.innerHTML=`🔻 Put ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，約為 <b class="hl">${hit.time}</b>（${ago}）嘅水平`;
+      const yrs=(months/12).toFixed(1);
+      const ago = LANG==="en" ? (months>=12?`${yrs} years ago`:`${months} months ago`)
+                : LANG==="sc" ? (months>=12?`约 ${yrs} 年前`:`约 ${months} 个月前`)
+                : (months>=12?`約 ${yrs} 年前`:`約 ${months} 個月前`);
+      c._lvlNote.innerHTML = LANG==="en"
+        ? `🔻 Put level ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>, corresponding to the price level last seen on <b class="hl">${hit.time}</b> (${ago}).`
+        : LANG==="sc"
+        ? `🔻 行使价 ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，相当于 <b class="hl">${hit.time}</b>（${ago}）之价格水平。`
+        : `🔻 行使價 ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，相當於 <b class="hl">${hit.time}</b>（${ago}）之價格水平。`;
     }else{
-      c._lvlNote.innerHTML=`🔻 Put ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，顯示範圍內未見此水平（更耐之前／歷史新低區）— 可撳 3Y/5Y/10Y 睇`;
+      c._lvlNote.innerHTML = LANG==="en"
+        ? `🔻 Put level ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b> — not reached within the displayed range; select 3Y / 5Y / 10Y to view longer history.`
+        : LANG==="sc"
+        ? `🔻 行使价 ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，于显示范围内未曾触及；可选 3Y / 5Y / 10Y 查看较长历史。`
+        : `🔻 行使價 ${CUR.put}% ≈ <b class="hl">${fmt(putPx)}</b>，於顯示範圍內未曾觸及；可選 3Y / 5Y / 10Y 查看較長歷史。`;
     }
   }
 }
