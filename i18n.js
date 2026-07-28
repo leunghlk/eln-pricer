@@ -31,7 +31,9 @@ const I18N = {
     deliveryCash:"扣除交易費用 {fee} 後，餘額 {cash} 將以現金存入投資者帳戶。",
     deliveryRisk:"若接收時股價低於行使價，差額即為投資者之帳面虧損，本金將承受風險。",
     beTitle:"打和價（接貨 scenario，計利息收益）",
-    beLine:"打和價約為股價跌至 {bePct}%（即 {bePx}）時投資者接貨之帳面打和（已計全期票息 {cpn} 及無風險利息 {int} @ {r}）。低於此價接貨即錄得淨虧損。",
+    beLevel:"打和價",beCpn:"全期票息",beRate:"無風險利率",beInterest:"計息收益",
+    obsLineHdr:"觀察安排",deliveryStrike:"接貨價",deliveryWorst:"接貨標的",deliveryShares:"可收股數",
+    deliveryFee:"交易費用",deliveryCashLbl:"餘額現金",perNotional:"每 {n}",
     disc:"數據為延遲/估算報價，不構成投資建議；實際條款以發行商 term sheet 為準。",
   },
   sc:{
@@ -66,6 +68,9 @@ const I18N = {
     deliveryRisk:"若接收时股价低于行使价，差额即为投资者之账面亏损，本金将承受风险。",
     beTitle:"打和价（接货情景，含利息收益）",
     beLine:"打和价约为股价跌至 {bePct}%（即 {bePx}）时投资者接货之账面打和（已计全期票息 {cpn} 及无风险利息 {int} @ {r}）。低于此价接货即录得净亏损。",
+    beLevel:"打和价",beCpn:"全期票息",beRate:"无风险利率",beInterest:"计息收益",
+    obsLineHdr:"观察安排",deliveryStrike:"接货价",deliveryWorst:"接货标的",deliveryShares:"可收股数",
+    deliveryFee:"交易费用",deliveryCashLbl:"余额现金",perNotional:"每 {n}",
     disc:"数据为延迟/估算报价，不构成投资建议；实际条款以发行商 term sheet 为准。",
   },
   en:{
@@ -100,6 +105,9 @@ const I18N = {
     deliveryRisk:"If the market price is below the strike at delivery, the shortfall represents the investor's loss and principal is at risk.",
     beTitle:"Breakeven (delivery scenario, incl. interest)",
     beLine:"Breakeven ≈ when the stock falls to {bePct}% (i.e. {bePx}): the investor breaks even on delivery, after full coupon {cpn} and risk-free interest {int} @ {r}. Below this, taking delivery realizes a net loss.",
+    beLevel:"Breakeven",beCpn:"Full coupon",beRate:"Risk-free rate",beInterest:"interest earned",
+    obsLineHdr:"Observation",deliveryStrike:"Strike",deliveryWorst:"Delivery asset",deliveryShares:"Shares received",
+    deliveryFee:"Fees",deliveryCashLbl:"Residual cash",perNotional:"per {n}",
     disc:"Data is delayed/estimated, not investment advice; actual terms per issuer term sheet.",
   }
 };

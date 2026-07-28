@@ -63,6 +63,11 @@ tr.hi{background:rgba(240,192,64,.07)}
 .footer{text-align:center;color:var(--muted);font-size:11px;padding:18px}
 .err{color:var(--up);font-size:12px;margin-top:8px;display:none}
 .hint{font-size:11.5px;color:var(--gold);opacity:.85;margin-top:8px;line-height:1.45}
+.kv{display:grid;grid-template-columns:118px 1fr;gap:4px 14px;font-size:12.5px;margin:4px 0 2px}
+.kvl{color:var(--muted);text-align:right;padding:2px 0;border-bottom:1px dotted var(--line)}
+.kvv{color:var(--txt);padding:2px 0;border-bottom:1px dotted var(--line);font-variant-numeric:tabular-nums}
+.kvv .mut{color:var(--muted);font-size:11.5px;font-weight:400}
+.kvv .hl{color:var(--gold)}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .toolbar .btn{width:auto;margin-top:0;padding:7px 12px;font-size:12.5px}
 .ticker-tag{font-size:11px;color:var(--muted);margin-top:4px}

@@ -595,34 +595,36 @@ function renderScenarios(S,p,out){
   const remainCash=fracCash - fee;
   // highlight values
   const hl=s=>`<b class="hl">${s}</b>`;
+  const kv=(k,v)=>`<div class="kvl">${k}</div><div class="kvv">${v}</div>`;
   let html=`<div class="scnhead">${T("scnDetailTitle")}</div>`;
-  html+=`<p>${T("perCpnLine")}：${hl(ccy+fmt(S.perCpn,0))}（${T("cCoupon")} ${pct(out.coupon)} p.a.）· ${T("maxTotalLine")}：${hl(ccy+fmt(S.totalCpnIfHeld,0))}</p>`;
-  html+=`<p>${T("obsLine")}：${p.callable==="daily"
+  html+=`<div class="kv">`;
+  html+=kv(T("perCpnLine"),`${hl(ccy+fmt(S.perCpn,0))} <span class="mut">(${T("cCoupon")} ${pct(out.coupon)} p.a.)</span>`);
+  html+=kv(T("maxTotalLine"),hl(ccy+fmt(S.totalCpnIfHeld,0)));
+  html+=`</div>`;
+  html+=`<div class="kv">`;
+  html+=kv(T("obsLine"), p.callable==="daily"
       ? T("dailyObs").replace("{m}",S.firstObsMonths)
-      : T("periodObs")}</p>`;
+      : T("periodObs"));
+  html+=`</div>`;
   html+=`<div class="scnhead2">${T("deliveryTitle")}</div>`;
-  html+=`<p>${T("deliveryDesc")
-      .replace("{worst}",hl(worstName))
-      .replace("{strikePct}",hl(pct(out.put)))
-      .replace("{strikePx}",hl(ccy+fmt(strikePx,2)))
-      .replace("{notional}",hl(ccy+fmt(notional,0)))
-      .replace("{shares}",hl(fmt(wholeShares,0)))}</p>`;
-  html+=`<p>${T("deliveryCash")
-      .replace("{fee}",hl(ccy+fmt(fee,2)))
-      .replace("{cash}",hl(ccy+fmt(Math.max(0,remainCash),2)))}</p>`;
+  html+=`<div class="kv">`;
+  html+=kv(T("deliveryStrike"),`${hl(pct(out.put))} <span class="mut">(${hl(ccy+fmt(strikePx,2))})</span>`);
+  html+=kv(T("deliveryWorst"),hl(worstName));
+  html+=kv(T("deliveryShares"),`${hl(fmt(wholeShares,0))} <span class="mut">${T("perNotional").replace("{n}",ccy+fmt(notional,0))}</span>`);
+  html+=kv(T("deliveryFee"),hl(ccy+fmt(fee,2)));
+  html+=kv(T("deliveryCashLbl"),hl(ccy+fmt(Math.max(0,remainCash),2)));
+  html+=`</div>`;
   // ---- Breakeven spot (incl. interest earned), assuming delivery at maturity ----
   if(S.beSpot>0 && S.bePct>0){
     const bePx=ccy+fmt(S.beSpot,2);
     const rPct=pct(S.rfRate*100,1);
     const intPx=ccy+fmt(S.interestEarned,0);
     html+=`<div class="scnhead2">${T("beTitle")||"Breakeven (接貨 scenario)"}</div>`;
-    html+=`<p>${T("beLine")
-        .replace("{bePct}",hl(pct(S.bePct,1)))
-        .replace("{bePx}",hl(bePx))
-        .replace("{strikePct}",hl(pct(out.put)))
-        .replace("{cpn}",hl(ccy+fmt(S.totalCpnIfHeld,0)))
-        .replace("{r}",hl(rPct))
-        .replace("{int}",hl(intPx))}</p>`;
+    html+=`<div class="kv">`;
+    html+=kv(T("beLevel"),`${hl(pct(S.bePct,1))} <span class="mut">(${hl(bePx)})</span>`);
+    html+=kv(T("beCpn"),hl(ccy+fmt(S.totalCpnIfHeld,0)));
+    html+=kv(T("beRate"),`${hl(rPct)} <span class="mut">→ ${T("beInterest")} ${hl(intPx)}</span>`);
+    html+=`</div>`;
   }
   html+=`<p class="warn">${T("deliveryRisk")}</p>`;
   $("scnDetail").innerHTML=html;
