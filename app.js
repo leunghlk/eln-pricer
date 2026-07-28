@@ -75,12 +75,12 @@ async function loadChart(range){
 
 function newChart(el){
   const chart=LightweightCharts.createChart(el,{
-    layout:{background:{color:"#0a1c38"},textColor:"#cfe0ff"},
-    grid:{vertLines:{color:"#13294d"},horzLines:{color:"#13294d"}},
-    rightPriceScale:{borderColor:"#1d3a66"},timeScale:{borderColor:"#1d3a66",rightOffset:0,fixLeftEdge:false},crosshair:{mode:1}});
-  const series=chart.addCandlestickSeries({upColor:"rgba(226,59,59,0)",downColor:"#1faa59",
-    borderUpColor:"#e23b3b",borderDownColor:"#1faa59",wickUpColor:"#e23b3b",wickDownColor:"#1faa59"});
-  const maSeries=chart.addLineSeries({color:"#f5c542",lineWidth:2,priceLineVisible:false,lastValueVisible:true,
+    layout:{background:{color:"#ffffff"},textColor:"#1a2540"},
+    grid:{vertLines:{color:"#eceff5"},horzLines:{color:"#eceff5"}},
+    rightPriceScale:{borderColor:"#d0d8e5"},timeScale:{borderColor:"#d0d8e5",rightOffset:0,fixLeftEdge:false},crosshair:{mode:1}});
+  const series=chart.addCandlestickSeries({upColor:"rgba(196,24,24,0)",downColor:"#099960",
+    borderUpColor:"#c41818",borderDownColor:"#099960",wickUpColor:"#c41818",wickDownColor:"#099960"});
+  const maSeries=chart.addLineSeries({color:"#8a6d1f",lineWidth:2,priceLineVisible:false,lastValueVisible:true,
     title:"MA"});
   const c={chart,series,maSeries,_call:null,_put:null,_spot:0,_tt:null,_lvlNote:null,_data:null};
   chart.subscribeCrosshairMove(param=>onHover(param,c,el));
@@ -98,8 +98,8 @@ function renderCharts(tickers, all){
     const box=document.createElement("div");box.className="subchart";
     const cap=document.createElement("div");cap.className="subcap";
     const src=all[i].source==="sample"
-      ? '<span style="color:#ffb454">[SAMPLE 假數據]</span>'
-      : '<span style="color:#37d67a">● 真實數據：'+all[i].provider+'</span>';
+      ? '<span style="color:#d97706">[SAMPLE 假數據]</span>'
+      : '<span style="color:#099960">● 真實數據：'+all[i].provider+'</span>';
     cap.innerHTML=`<b>${t}</b> · ${tickerName(t)} <span style="font-size:11px">${src}</span>`;
     const el=document.createElement("div");el.className="subel";el.style.height="300px";el.style.position="relative";
     const tt=document.createElement("div");tt.className="cht-tt";tt.style.display="none";
@@ -124,7 +124,7 @@ function onHover(param,c,el){
   if(!d){tt.style.display="none";return;}
   const up=d.close>=d.open;
   tt.innerHTML=`<b>${param.time}</b><br>開 ${fmt(d.open)} · 高 ${fmt(d.high)}<br>低 ${fmt(d.low)} · 收 ${fmt(d.close)} `+
-    `<span style="color:${up?'#e23b3b':'#1faa59'}">${up?'▲':'▼'}${fmt(d.close-d.open)}</span>`;
+    `<span style="color:${up?'#c41818':'#099960'}">${up?'▲':'▼'}${fmt(d.close-d.open)}</span>`;
   tt.style.display="block";
   const w=el.getBoundingClientRect();
   let x=param.point.x+16, y=param.point.y+12;
@@ -142,12 +142,12 @@ function drawLevelsOn(c){
   if(c._be)c.series.removePriceLine(c._be);
   if(!c._spot||!CUR.call||!CUR.put)return;
   const putPx=c._spot*CUR.put/100;
-  c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
-  c._put =c.series.createPriceLine({price:putPx,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
+  c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#099960",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
+  c._put =c.series.createPriceLine({price:putPx,color:"#c41818",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
   // breakeven spot (incl. interest) — dashed gold line, only when valid
   if(CUR.bePut && CUR.bePut>0 && CUR.bePut < CUR.put){
     const bePx=c._spot*CUR.bePut/100;
-    c._be=c.series.createPriceLine({price:bePx,color:"#f5c542",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:`BE ${CUR.bePut.toFixed(1)}%`});
+    c._be=c.series.createPriceLine({price:bePx,color:"#8a6d1f",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:`BE ${CUR.bePut.toFixed(1)}%`});
   }
   // Put level ≈ historical level note (formal, localized)
   if(c._lvlNote){
@@ -670,19 +670,19 @@ function saveSnapshot(){
   const tmp=document.createElement("canvas"); tmp.width=W; tmp.height=2600;
   const g=tmp.getContext("2d");
   g.imageSmoothingEnabled=true; g.imageSmoothingQuality="high"; g.textBaseline="alphabetic";
-  g.fillStyle="#0a1c38"; g.fillRect(0,0,W,tmp.height);
+  g.fillStyle="#ffffff"; g.fillRect(0,0,W,tmp.height);
 
   // --- title bar ---
   const stk=p.basket?BASKET.join(" + "):p.ticker;
   const stkName=p.basket?BASKET.map(tickerName).join(" + "):tickerName(p.ticker);
-  g.fillStyle="#f5c542"; g.font="bold 28px Arial"; g.textAlign="left";
+  g.fillStyle="#8a6d1f"; g.font="bold 28px Arial"; g.textAlign="left";
   g.fillText(`${stk} (${stkName})`,ML,44);
   const cfreqDisp = {monthly:"Monthly",quarterly:"Quarterly",semi:"Semi-Annual",annual:"Annual",bi:"Bi-Monthly",bimonthly:"Bi-Monthly"}[p.cfreq]||p.cfreq;
   const callableTxt = p.callable==="daily" ? `${cfreqDisp} + Daily Close` : `${cfreqDisp} + Period End`;
-  g.fillStyle="#cfe0ff"; g.font="18px Arial";
+  g.fillStyle="#3a4a68"; g.font="18px Arial";
   const cpnStr = p.coupon ? `${p.coupon}% p.a.` : "(solving)";
-  g.fillText(`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M`,ML,76);
-  g.fillStyle="#f5c542"; g.font="bold 22px Arial";
+  g.fillText(`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M · ${sym(p.ccy)}${fmt(p.notional,0)} ${p.ccy}`,ML,76);
+  g.fillStyle="#8a6d1f"; g.font="bold 22px Arial";
   const sv=$("solveVal").textContent;
   const putMatch=sv.match(/([\d.]+)\s*%/);
   const solveLine = p.put==null
@@ -692,7 +692,7 @@ function saveSnapshot(){
 
   // --- Section 1: chart (full screenshot incl. axes) ---
   let y=150;
-  g.fillStyle="#cfe0ff"; g.font="bold 19px Arial";
+  g.fillStyle="#3a4a68"; g.font="bold 19px Arial";
   g.fillText(LANG==="en"?"1 · Daily Chart":(LANG==="sc"?"1 · 日线图":"1 · 日線圖"),ML,y); y+=22;
   const chY=y, chH=640;
   function drawShot(src,x,yy,w,h){
@@ -709,7 +709,7 @@ function saveSnapshot(){
   }
   // SMA legend overlay: top-right corner of the chart
   if(SMA_ON){
-    g.textAlign="right"; g.fillStyle="#f5c542"; g.font="bold 15px Arial";
+    g.textAlign="right"; g.fillStyle="#8a6d1f"; g.font="bold 15px Arial";
     g.fillText(`📈 ${$("smaN").value} SMA`, MR-8, chY+24);
     g.textAlign="left";
   }
@@ -717,20 +717,20 @@ function saveSnapshot(){
 
   // --- chart sub-notes: put level (lvlnote) — right below the chart ---
   if(CHARTS[0] && CHARTS[0]._lvlNote && CHARTS[0]._lvlNote.innerText.trim()){
-    y+=4; g.fillStyle="#cfe0ff"; g.font="15px Arial";
+    y+=4; g.fillStyle="#3a4a68"; g.font="15px Arial";
     wrapLines(g, CHARTS[0]._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
   }
   // SMA legend: drawn at top-right corner of the chart (overlay)
   y+=22;
 
   // --- Section 2: scenario table ---
-  g.fillStyle="#cfe0ff"; g.font="bold 19px Arial";
+  g.fillStyle="#3a4a68"; g.font="bold 19px Arial";
   g.fillText(LANG==="en"?"2 · Scenario Analysis":(LANG==="sc"?"2 · 情景分析":"2 · 情景分析"),ML,y); y+=8;
   const tbl=$("scnTable");
   const hdrCells=[...tbl.querySelectorAll("thead th")].map(th=>th.innerText.trim());
   const colX=[ML, ML+300, ML+440, ML+640, ML+940];   // 5 columns (W=1800)
   const colGap=12;
-  g.font="bold 17px Arial"; g.fillStyle="#f5c542";
+  g.font="bold 17px Arial"; g.fillStyle="#8a6d1f";
   hdrCells.forEach((c,ci)=>{ if(ci<colX.length) g.fillText(c,colX[ci],y+16); });
   y+=30;
   g.font="16px Arial";
@@ -744,9 +744,9 @@ function saveSnapshot(){
     const lh=24;
     cells.forEach((cell,ci)=>{
       if(ci>=colX.length)return;
-      let color="#cfe0ff";
+      let color="#3a4a68";
       const sp=cell.querySelector("span");
-      if(sp){ if(sp.classList.contains("good"))color="#37d67a"; else if(sp.classList.contains("bad"))color="#e23b3b"; }
+      if(sp){ if(sp.classList.contains("good"))color="#099960"; else if(sp.classList.contains("bad"))color="#c41818"; }
       g.fillStyle=color;
       linesPerCell[ci].forEach((ln,k)=>g.fillText(ln,colX[ci],y+16+k*lh));
     });
@@ -755,7 +755,7 @@ function saveSnapshot(){
 
   // --- Coupon & Observation Arrangement (mirrors on-screen scnDetail grid) ---
   y+=14;
-  g.fillStyle="#f5c542"; g.font="bold 19px Arial";
+  g.fillStyle="#8a6d1f"; g.font="bold 19px Arial";
   g.fillText(LANG==="en"?"Coupon & Observation Arrangement":(LANG==="sc"?"票息与收回安排":"票息與收回安排"),ML,y);
   y+=30;
   const KVW=210;                       // label column width
@@ -764,23 +764,23 @@ function saveSnapshot(){
     const cls=(ch.className||"");
     if(cls.includes("scnhead")) return;          // main title already drawn above
     if(cls.includes("scnhead2")){                 // section sub-header
-      y+=8; g.fillStyle="#f5c542"; g.font="bold 16px Arial";
+      y+=8; g.fillStyle="#8a6d1f"; g.font="bold 16px Arial";
       g.fillText(ch.innerText.trim(),ML,y); y+=26; return;
     }
     if(cls.includes("kv")){                        // key-value grid row(s)
       const kvs=[...ch.children];
       for(let i=0;i+1<kvs.length;i+=2){
         const k=kvs[i].innerText.trim(), v=kvs[i+1].innerText.trim();
-        g.fillStyle="#9fb3d1"; g.font="15px Arial"; g.textAlign="right";
+        g.fillStyle="#5a6a85"; g.font="15px Arial"; g.textAlign="right";
         g.fillText(k, ML+KVW, y);
         g.textAlign="left"; g.font="bold 15px Arial";
         // value: highlight the key number/amount (first token) gold, rest in light text
         const sp=v.indexOf(" ");
         const numPart = sp>0 ? v.slice(0,sp) : v;
         const restPart = sp>0 ? v.slice(sp) : "";
-        g.fillStyle="#f5c542"; g.fillText(numPart, ML+KVW+12, y);
+        g.fillStyle="#8a6d1f"; g.fillText(numPart, ML+KVW+12, y);
         if(restPart){
-          g.fillStyle="#9fb3d1"; g.font="14px Arial";
+          g.fillStyle="#5a6a85"; g.font="14px Arial";
           const lines=wrapLines(g,restPart,MR-(ML+KVW+12+g.measureText(numPart).width+6));
           g.fillText(restPart.replace(/\s+/g," ").trim(), ML+KVW+12+g.measureText(numPart).width+6, y);
         }
@@ -789,7 +789,7 @@ function saveSnapshot(){
       return;
     }
     if(cls.includes("warn")){                      // risk warning line
-      g.fillStyle="#f5c542"; g.font="15px Arial";
+      g.fillStyle="#8a6d1f"; g.font="15px Arial";
       wrapLines(g,ch.innerText.trim(),MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
       y+=4; return;
     }
@@ -797,7 +797,7 @@ function saveSnapshot(){
 
   // --- footnote ---
   y+=14;
-  g.fillStyle="#7090c0"; g.font="13px Arial";
+  g.fillStyle="#8a99b0"; g.font="13px Arial";
   g.fillText(`Generated ${new Date().toISOString().slice(0,10)} · ELN Pricer · Indicative only, not a guarantee of return.`,ML,y);
 
   // --- crop to used height + export ---
