@@ -142,12 +142,14 @@ function drawLevelsOn(c){
   if(c._be)c.series.removePriceLine(c._be);
   if(!c._spot||!CUR.call||!CUR.put)return;
   const putPx=c._spot*CUR.put/100;
-  c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#099960",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
-  c._put =c.series.createPriceLine({price:putPx,color:"#c41818",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
+  const clTitle = LANG==="en"?`Call ${CUR.call}%`:(LANG==="sc"?`收回 ${CUR.call}%`:`收回 ${CUR.call}%`);
+  const ptTitle = LANG==="en"?`Put ${CUR.put}%`:(LANG==="sc"?`行使 ${CUR.put}%`:`行使 ${CUR.put}%`);
+  c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#099960",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:clTitle});
+  c._put =c.series.createPriceLine({price:putPx,color:"#c41818",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:ptTitle});
   // breakeven spot (incl. interest) — dashed gold line, only when valid
   if(CUR.bePut && CUR.bePut>0 && CUR.bePut < CUR.put){
     const bePx=c._spot*CUR.bePut/100;
-    c._be=c.series.createPriceLine({price:bePx,color:"#8a6d1f",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:`BE ${CUR.bePut.toFixed(1)}%`});
+    c._be=c.series.createPriceLine({price:bePx,color:"#8a6d1f",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`BE ${CUR.bePut.toFixed(1)}%`});
   }
   // Put level ≈ historical level note (formal, localized)
   if(c._lvlNote){
@@ -679,19 +681,33 @@ function saveSnapshot(){
   g.fillText(`${stk} (${stkName})`,ML,44);
   const cfreqDisp = {monthly:"Monthly",quarterly:"Quarterly",semi:"Semi-Annual",annual:"Annual",bi:"Bi-Monthly",bimonthly:"Bi-Monthly"}[p.cfreq]||p.cfreq;
   const callableTxt = p.callable==="daily" ? `${cfreqDisp} + Daily Close` : `${cfreqDisp} + Period End`;
-  g.fillStyle="#3a4a68"; g.font="18px Arial";
-  const cpnStr = p.coupon ? `${p.coupon}% p.a.` : "(solving)";
-  g.fillText(`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M · ${sym(p.ccy)}${fmt(p.notional,0)} ${p.ccy}`,ML,76);
-  g.fillStyle="#8a6d1f"; g.font="bold 22px Arial";
-  const sv=$("solveVal").textContent;
-  const putMatch=sv.match(/([\d.]+)\s*%/);
-  const solveLine = p.put==null
-    ? `Solve for PUT: ${putMatch?putMatch[1]+"%":"—"}`
-    : `Solve for COUPON: ${putMatch?putMatch[1]+"%":"—"}`;
-  g.fillText(solveLine,ML,108);
+  const cpnStr = p.coupon ? `${p.coupon}% p.a.` : "—";
+  const putStr = p.put!=null ? `${p.put}%` : (sv=>{const m=sv.match(/([\d.]+)\s*%/);return m?`${m[1]}%`:"—";})($("solveVal").textContent);
+  // headline: Notional+CCY • Tenor • Coupon • PUT% • CALL% • Freq (all same size, numbers in bronze)
+  const fs=20;
+  const parts=[
+    {t:`${sym(p.ccy)}${fmt(p.notional,0)} ${p.ccy}`,num:true},
+    {t:` · `,num:false},
+    {t:`${p.tenor}M`,num:true},{t:` Tenor`,num:false},
+    {t:` · `,num:false},
+    {t:cpnStr,num:true},{t:` Coupon`,num:false},
+    {t:` · `,num:false},
+    {t:`${putStr} PUT`,num:true},
+    {t:` · `,num:false},
+    {t:`${p.call}% CALL`,num:true},
+    {t:` · ${callableTxt}`,num:false},
+  ];
+  let hx=ML;
+  g.font=`${fs}px Arial`;
+  parts.forEach(p2=>{
+    g.fillStyle=p2.num?"#8a6d1f":"#3a4a68";
+    g.font=p2.num?`bold ${fs}px Arial`:`${fs}px Arial`;
+    g.fillText(p2.t,hx,78);
+    hx+=g.measureText(p2.t).width;
+  });
 
   // --- Section 1: chart (full screenshot incl. axes) ---
-  let y=150;
+  let y=104;
   g.fillStyle="#3a4a68"; g.font="bold 19px Arial";
   g.fillText(LANG==="en"?"1 · Daily Chart":(LANG==="sc"?"1 · 日线图":"1 · 日線圖"),ML,y); y+=22;
   const chY=y, chH=640;
