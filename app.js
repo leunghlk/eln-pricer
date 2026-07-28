@@ -568,7 +568,7 @@ function renderScenarios(S,p,out){
   const rows=[
     {t:T("sc1"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.cpnByFirstObs,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(S.firstObsMonths/12)*100),cls:"good"},
-    {t:T("sc2"),called:T("yes"),cpn:`${T("cpnAccrued")} = ${T("perCpnLine")} × 已派期數`,
+    {t:T("sc2"),called:T("yes"),cpn:`累計=每期票息×期數`,
      prin:T("prinBack"),ret:"+"+sym(p.ccy)+fmt(S.cpnByFirstObs,0),cls:"good"},
     {t:T("sc3"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.totalCpnIfHeld,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(p.tenor/12)*100),cls:"good"},
@@ -718,11 +718,11 @@ function saveSnapshot(){
     y+=4; g.fillStyle="#f5c542"; g.font="bold 15px Arial";
     g.fillText(`📈 ${$("smaN").value} SMA overlay`,ML,y); y+=22;
   }
-  y+=8;
+  y+=22;
 
   // --- Section 2: scenario table ---
-  g.fillStyle="#cfe0ff"; g.font="bold 14px Arial";
-  g.fillText("2 · Scenario Analysis (estimated)",ML,y); y+=8;
+  g.fillStyle="#cfe0ff"; g.font="bold 19px Arial";
+  g.fillText(LANG==="en"?"2 · Scenario Analysis":(LANG==="sc"?"2 · 情景分析":"2 · 情景分析"),ML,y); y+=8;
   const tbl=$("scnTable");
   const hdrCells=[...tbl.querySelectorAll("thead th")].map(th=>th.innerText.trim());
   const colX=[ML, ML+300, ML+440, ML+640, ML+940];   // 5 columns (W=1800)
@@ -770,7 +770,7 @@ function saveSnapshot(){
         const k=kvs[i].innerText.trim(), v=kvs[i+1].innerText.trim();
         g.fillStyle="#9fb3d1"; g.font="15px Arial"; g.textAlign="right";
         g.fillText(k, ML+KVW, y);
-        g.textAlign="left"; g.fillStyle="#eaf2ff"; g.font="15px Arial";
+        g.textAlign="left"; g.fillStyle="#f5c542"; g.font="bold 15px Arial";   // gold value (dashboard highlight)
         wrapLines(g,v,MR-(ML+KVW+12)).forEach((ln,k2)=>{ g.fillText(ln,ML+KVW+12,y+k2*22); });
         y+=22*Math.max(1,wrapLines(g,v,MR-(ML+KVW+12)).length)+4;
       }
