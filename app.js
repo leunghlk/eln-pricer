@@ -568,8 +568,8 @@ function renderScenarios(S,p,out){
   const rows=[
     {t:T("sc1"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.cpnByFirstObs,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(S.firstObsMonths/12)*100),cls:"good"},
-    {t:T("sc2"),called:T("yes"),cpn:T("cpnAccrued"),
-     prin:T("prinBack"),ret:"+"+T("cpnAccrued"),cls:"good"},
+    {t:T("sc2"),called:T("yes"),cpn:`${T("cpnAccrued")} = ${T("cCoupon")} × ${(S.cpnByFirstObs/Math.max(1e-9,S.perCpn)).toFixed(0)} 期`,
+     prin:T("prinBack"),ret:"+"+sym(p.ccy)+fmt(S.cpnByFirstObs,0),cls:"good"},
     {t:T("sc3"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.totalCpnIfHeld,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(p.tenor/12)*100),cls:"good"},
     {t:T("sc4"),called:T("no"),cpn:sym(p.ccy)+fmt(S.totalCpnIfHeld,0),
@@ -617,13 +617,9 @@ function renderScenarios(S,p,out){
   // ---- Breakeven spot (incl. interest earned), assuming delivery at maturity ----
   if(S.beSpot>0 && S.bePct>0){
     const bePx=ccy+fmt(S.beSpot,2);
-    const rPct=pct(S.rfRate*100,1);
-    const intPx=ccy+fmt(S.interestEarned,0);
     html+=`<div class="scnhead2">${T("beTitle")||"Breakeven (接貨 scenario)"}</div>`;
     html+=`<div class="kv">`;
     html+=kv(T("beLevel"),`${hl(pct(S.bePct,1))} <span class="mut">(${hl(bePx)})</span>`);
-    html+=kv(T("beCpn"),hl(ccy+fmt(S.totalCpnIfHeld,0)));
-    html+=kv(T("beRate"),`${hl(rPct)} <span class="mut">→ ${T("beInterest")} ${hl(intPx)}</span>`);
     html+=`</div>`;
   }
   html+=`<p class="warn">${T("deliveryRisk")}</p>`;
@@ -669,36 +665,36 @@ function saveSnapshot(){
   }).filter(Boolean);
   if(!shots.length){ toast("Chart not loaded"); return; }
 
-  const W=1400, ML=24, MR=W-24, CW=MR-ML;
+  const W=1800, ML=28, MR=W-28, CW=MR-ML;
   // draw onto a tall offscreen canvas, then crop to the used height (avoids blank clip)
-  const tmp=document.createElement("canvas"); tmp.width=W; tmp.height=2200;
+  const tmp=document.createElement("canvas"); tmp.width=W; tmp.height=2600;
   const g=tmp.getContext("2d");
-  g.imageSmoothingEnabled=true; g.imageSmoothingQuality="high";
+  g.imageSmoothingEnabled=true; g.imageSmoothingQuality="high"; g.textBaseline="alphabetic";
   g.fillStyle="#0a1c38"; g.fillRect(0,0,W,tmp.height);
 
   // --- title bar ---
   const stk=p.basket?BASKET.join(" + "):p.ticker;
   const stkName=p.basket?BASKET.map(tickerName).join(" + "):tickerName(p.ticker);
-  g.fillStyle="#f5c542"; g.font="bold 20px Arial"; g.textAlign="left";
-  g.fillText(`${stk} (${stkName})`,ML,36);
-  const cfreqDisp = {monthly:"Monthly",quarterly:"Quarterly",semi:"Semi-Annual",annual:"Annual"}[p.cfreq]||p.cfreq;
+  g.fillStyle="#f5c542"; g.font="bold 28px Arial"; g.textAlign="left";
+  g.fillText(`${stk} (${stkName})`,ML,44);
+  const cfreqDisp = {monthly:"Monthly",quarterly:"Quarterly",semi:"Semi-Annual",annual:"Annual",bi:"Bi-Monthly",bimonthly:"Bi-Monthly"}[p.cfreq]||p.cfreq;
   const callableTxt = p.callable==="daily" ? `${cfreqDisp} + Daily Close` : `${cfreqDisp} + Period End`;
-  g.fillStyle="#cfe0ff"; g.font="14px Arial";
+  g.fillStyle="#cfe0ff"; g.font="18px Arial";
   const cpnStr = p.coupon ? `${p.coupon}% p.a.` : "(solving)";
-  g.fillText(`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M`,ML,60);
-  g.fillStyle="#f5c542"; g.font="bold 16px Arial";
+  g.fillText(`Call ${p.call}% · Coupon ${cpnStr} ${callableTxt} · Tenor ${p.tenor}M`,ML,76);
+  g.fillStyle="#f5c542"; g.font="bold 22px Arial";
   const sv=$("solveVal").textContent;
   const putMatch=sv.match(/([\d.]+)\s*%/);
   const solveLine = p.put==null
     ? `Solve for PUT: ${putMatch?putMatch[1]+"%":"—"}`
     : `Solve for COUPON: ${putMatch?putMatch[1]+"%":"—"}`;
-  g.fillText(solveLine,ML,84);
+  g.fillText(solveLine,ML,108);
 
   // --- Section 1: chart (full screenshot incl. axes) ---
-  let y=120;
-  g.fillStyle="#cfe0ff"; g.font="bold 14px Arial";
-  g.fillText("1 · Candlestick Chart (red up / green down)",ML,y); y+=18;
-  const chY=y, chH=470;
+  let y=150;
+  g.fillStyle="#cfe0ff"; g.font="bold 19px Arial";
+  g.fillText(LANG==="en"?"1 · Daily Chart":(LANG==="sc"?"1 · 日线图":"1 · 日線圖"),ML,y); y+=22;
+  const chY=y, chH=640;
   function drawShot(src,x,yy,w,h){
     const sw=src.width, sh=src.height; if(!sw||!sh)return;
     const scale=Math.min(w/sw, h/sh);
@@ -718,12 +714,12 @@ function saveSnapshot(){
   g.fillText("2 · Scenario Analysis (estimated)",ML,y); y+=8;
   const tbl=$("scnTable");
   const hdrCells=[...tbl.querySelectorAll("thead th")].map(th=>th.innerText.trim());
-  const colX=[ML, ML+236, ML+336, ML+486, ML+706];   // 5 columns
-  const colGap=10;
-  g.font="bold 12px Arial"; g.fillStyle="#f5c542";
-  hdrCells.forEach((c,ci)=>{ if(ci<colX.length) g.fillText(c,colX[ci],y+14); });
-  y+=22;
-  g.font="12px Arial";
+  const colX=[ML, ML+300, ML+440, ML+640, ML+940];   // 5 columns (W=1800)
+  const colGap=12;
+  g.font="bold 17px Arial"; g.fillStyle="#f5c542";
+  hdrCells.forEach((c,ci)=>{ if(ci<colX.length) g.fillText(c,colX[ci],y+16); });
+  y+=30;
+  g.font="16px Arial";
   [...tbl.querySelectorAll("tbody tr")].forEach(r=>{
     const cells=[...r.querySelectorAll("td")];
     const linesPerCell=cells.map((cell,ci)=>{
@@ -731,34 +727,43 @@ function saveSnapshot(){
       return wrapLines(g, cell.innerText.replace(/\s+/g," ").trim(), w);
     });
     const maxLines=Math.max(1,...linesPerCell.map(a=>a.length));
-    const lh=18;
+    const lh=24;
     cells.forEach((cell,ci)=>{
       if(ci>=colX.length)return;
       let color="#cfe0ff";
       const sp=cell.querySelector("span");
       if(sp){ if(sp.classList.contains("good"))color="#37d67a"; else if(sp.classList.contains("bad"))color="#e23b3b"; }
       g.fillStyle=color;
-      linesPerCell[ci].forEach((ln,k)=>g.fillText(ln,colX[ci],y+14+k*lh));
+      linesPerCell[ci].forEach((ln,k)=>g.fillText(ln,colX[ci],y+16+k*lh));
     });
-    y+=maxLines*lh+6;
+    y+=maxLines*lh+10;
   });
 
-  // --- Coupon & Observation Arrangement (full, mirrors on-screen scnDetail) ---
-  y+=10;
-  g.fillStyle="#f5c542"; g.font="bold 13px Arial";
+  // --- chart sub-notes: put level (lvlnote) + SMA legend ---
+  if(CHARTS[0] && CHARTS[0]._lvlNote && CHARTS[0]._lvlNote.innerText.trim()){
+    y+=6; g.fillStyle="#cfe0ff"; g.font="15px Arial";
+    wrapLines(g, CHARTS[0]._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
+  }
+  if(SMA_ON){
+    y+=4; g.fillStyle="#f5c542"; g.font="bold 15px Arial";
+    g.fillText(`📈 ${$("smaN").value} SMA overlay`,ML,y); y+=22;
+  }
+
+  // --- Coupon & Observation Arrangement (mirrors on-screen scnDetail) ---
+  y+=14;
+  g.fillStyle="#f5c542"; g.font="bold 19px Arial";
   g.fillText(LANG==="en"?"Coupon & Observation Arrangement":(LANG==="sc"?"票息与收回安排":"票息與收回安排"),ML,y);
-  y+=22;
-  g.fillStyle="#cfe0ff"; g.font="12.5px Arial";
-  const detText=(($("scnDetail").innerText)||"").replace(/\r/g,"").trim();
-  detText.split("\n").forEach(raw=>{
-    const para=raw.trim(); if(!para)return;
-    wrapLines(g,para,MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=19; });
+  y+=26;
+  g.fillStyle="#cfe0ff"; g.font="16px Arial";
+  const detRaw=(($("scnDetail").innerText)||"").replace(/\r/g,"").split("\n").map(s=>s.trim()).filter(Boolean);
+  detRaw.slice(1).forEach(raw=>{   // slice(1): skip the first heading line (we drew it above)
+    wrapLines(g,raw,MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=24; });
     y+=4;
   });
 
   // --- footnote ---
-  y+=10;
-  g.fillStyle="#7090c0"; g.font="11px Arial";
+  y+=14;
+  g.fillStyle="#7090c0"; g.font="13px Arial";
   g.fillText(`Generated ${new Date().toISOString().slice(0,10)} · ELN Pricer · Indicative only, not a guarantee of return.`,ML,y);
 
   // --- crop to used height + export ---

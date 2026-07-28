@@ -47,7 +47,7 @@ function usSym(input){
 }
 function tickerName(input){
   const y=usSym(input); const u=UNIVERSE.find(x=>x[1]===y);
-  return u?u[2]:"(自訂 ticker)";
+  return u?u[2]:y;   // client-facing: show the raw symbol, never "(自訂 ticker)"
 }
 
 // ---- CONFIG: data providers ----

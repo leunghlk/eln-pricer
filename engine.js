@@ -79,11 +79,14 @@ function solveParams(p, iv){
   return {out, solved};
 }
 
-function couponsPerYear(freq){return {monthly:12,quarterly:4,semi:2,annual:1}[freq]||12;}
+function couponsPerYear(freq){return {monthly:12,bi:2,bimonthly:2,quarterly:4,semi:2,annual:1}[freq]||12;}
 function couponDates(issue,tenorM,freq){
-  const step={monthly:1,quarterly:3,semi:6,annual:12}[freq];
+  const step={monthly:1,bi:2,bimonthly:2,quarterly:3,semi:6,annual:12}[freq];
   const n=Math.ceil(tenorM/step); const dts=[];
-  for(let i=1;i<=n;i++){const d=new Date(issue);d.setMonth(d.getMonth()+i*step);dts.push(d);}
+  for(let i=1;i<=n;i++){const d=new Date(issue);d.setMonth(d.getMonth()+i*step);
+    // only count coupon dates that fall on/before maturity
+    const months=(d.getFullYear()-issue.getFullYear())*12+(d.getMonth()-issue.getMonth());
+    if(months<=tenorM) dts.push(d);}
   return dts;
 }
 
