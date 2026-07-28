@@ -52,11 +52,11 @@ async function runAll(){
     return;
   }
   if(hasC && hasP){
-    const m={tc:"Coupon 同 Put/Strike 只可填一項，另一項留空由系統求解。請清走其中一個。",
-             sc:"Coupon 与 Put/Strike 只可填一项，另一项留空由系统求解。请清除其中一个。",
-             en:"Fill in ONLY ONE of Coupon / Put-Strike — the other must stay blank for the solver. Please clear one."};
-    $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
-    return;
+    // Manual / term-sheet mode: both strike% and coupon% entered → use EXACTLY as given
+    // (like a FinIQ quotation). Skip the solver; graph + scenario show the entered scenario.
+    p.manual = true;
+  } else {
+    p.manual = false;
   }
   $("tickerName").textContent="→ "+tickerName(p.ticker);
   await loadChart(CUR.range||"6mo");
@@ -139,10 +139,16 @@ function drawLevelsOn(c){
   if(!c||!c.chart)return;
   if(c._call)c.series.removePriceLine(c._call);
   if(c._put)c.series.removePriceLine(c._put);
+  if(c._be)c.series.removePriceLine(c._be);
   if(!c._spot||!CUR.call||!CUR.put)return;
   const putPx=c._spot*CUR.put/100;
   c._call=c.series.createPriceLine({price:c._spot*CUR.call/100,color:"#37d67a",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Call ${CUR.call}%`});
   c._put =c.series.createPriceLine({price:putPx,color:"#e23b3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`Put ${CUR.put}%`});
+  // breakeven spot (incl. interest) — dashed gold line, only when valid
+  if(CUR.bePut && CUR.bePut>0 && CUR.bePut < CUR.put){
+    const bePx=c._spot*CUR.bePut/100;
+    c._be=c.series.createPriceLine({price:bePx,color:"#f5c542",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:`BE ${CUR.bePut.toFixed(1)}%`});
+  }
   // Put level ≈ historical level note (formal, localized)
   if(c._lvlNote){
     const ds=c._data||[];
@@ -464,9 +470,15 @@ function recompute(){
       // not in any calib → fall through to live IV model (solveParams)
     }
   }catch(e){}
+  // ---- Manual / term-sheet mode: both strike% & coupon% entered → use EXACTLY as given ----
+  // Applied AFTER the solver so it always wins; skip FinIQ sanity caps below.
+  if(p.manual){
+    calibHit = {put:+p.put, coupon:+p.coupon, src:"Manual term-sheet", manual:true};
+  }
 
   // ---- HK sanity cap: HK singles/baskets never price below 50% strike ----
-  if(calibHit){
+  // (skipped entirely in manual term-sheet mode — user enters the exact deal)
+  if(calibHit && !calibHit.manual){
     const hkDeal = (p.basket && BASKET.length>=2 && BASKET.every(s=>/^\d+$/.test(String(s).replace(/\.HK$/i,"").trim())))
                  || (!p.basket && isHK(usSym(p.ticker)));
     if(hkDeal && calibHit.put!=null && calibHit.put<50){
@@ -522,6 +534,11 @@ function recompute(){
     out={...p,coupon:calibHit.coupon,put:calibHit.put,gross:+(calibHit.coupon+p.mb).toFixed(2),basketAdj:1};
     solved={which:(hasCoupon&&!hasPut)?"put":(hasPut&&!hasCoupon)?"coupon":"both",
       note:`${T("cCoupon")} ${pct(calibHit.coupon)} · ${T("cPut")} ${pct(calibHit.put)}`};
+    if(calibHit.manual){
+      solved.which="manual";
+      solved.note = (LANG==="en"?"Manual term-sheet (exact scenario): ":LANG==="sc"?"手动条款（精确情景）：":"手動 term-sheet（精確情景）：")
+        + `${T("cCoupon")} ${pct(calibHit.coupon)} · ${T("cPut")} ${pct(calibHit.put)} · ${T("cCall")} ${pct(p.call)}`;
+    }
   } else {
     // live IV model (US single primary; also HK fallback)
     const r=solveParams(p,LAST_IV); out=r.out; solved=r.solved;
@@ -541,6 +558,7 @@ function recompute(){
   drawLevelsAll();
   // scenarios
   const S=buildScenarios({...out,tenor:p.tenor,cfreq:p.cfreq,notional:p.notional,ccy:p.ccy,spot:CUR.spot,issue:p.issue,lockout:p.lockout});
+  CUR.bePut = S.bePct; CUR.beSpot = S.beSpot;
   renderScenarios(S,p,out);
 }
 
@@ -592,6 +610,20 @@ function renderScenarios(S,p,out){
   html+=`<p>${T("deliveryCash")
       .replace("{fee}",hl(ccy+fmt(fee,2)))
       .replace("{cash}",hl(ccy+fmt(Math.max(0,remainCash),2)))}</p>`;
+  // ---- Breakeven spot (incl. interest earned), assuming delivery at maturity ----
+  if(S.beSpot>0 && S.bePct>0){
+    const bePx=ccy+fmt(S.beSpot,2);
+    const rPct=pct(S.rfRate*100,1);
+    const intPx=ccy+fmt(S.interestEarned,0);
+    html+=`<div class="scnhead2">${T("beTitle")||"Breakeven (接貨 scenario)"}</div>`;
+    html+=`<p>${T("beLine")
+        .replace("{bePct}",hl(pct(S.bePct,1)))
+        .replace("{bePx}",hl(bePx))
+        .replace("{strikePct}",hl(pct(out.put)))
+        .replace("{cpn}",hl(ccy+fmt(S.totalCpnIfHeld,0)))
+        .replace("{r}",hl(rPct))
+        .replace("{int}",hl(intPx))}</p>`;
+  }
   html+=`<p class="warn">${T("deliveryRisk")}</p>`;
   $("scnDetail").innerHTML=html;
 }

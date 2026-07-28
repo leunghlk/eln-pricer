@@ -87,6 +87,8 @@ function couponDates(issue,tenorM,freq){
   return dts;
 }
 
+// Risk-free carry rate per currency (for breakeven-with-interest)
+const RF_RATE = { USD:0.043, HKD:0.048, EUR:0.035 };
 function buildScenarios(o){
   // o: solved params incl coupon(client %), put, tenor, cfreq, notional, ccy, spot, lockout
   const notional=o.notional, cpA=o.coupon/100;
@@ -101,5 +103,15 @@ function buildScenarios(o){
   // lockout: earliest call = lockout months
   const firstObsMonths=o.lockout||1;
   const cpnByFirstObs = perCpn*Math.max(1, Math.round(firstObsMonths/(12/m)));
-  return {perCpn,totalCpnIfHeld,shares,strikePx,put,spot,cdates:cdates.length,cpnByFirstObs,firstObsMonths,notional,ccy:o.ccy};
+  // ---- Breakeven spot assuming DELIVERY at maturity, INCLUDING interest earned ----
+  // Client invests `notional`; over tenor T earns coupons (totalCpnIfHeld) AND forwent
+  // risk-free interest = notional * r * T. Effective cost basis of delivered shares =
+  // notional - coupons - interest. Breakeven spot = effective cost / shares.
+  const r = RF_RATE[o.ccy]!=null ? RF_RATE[o.ccy] : 0.04;
+  const interestEarned = notional * r * (o.tenor/12);
+  const beSpot = strikePx>0 ? strikePx - (totalCpnIfHeld + interestEarned)/shares : 0;
+  // bePct as % of spot: beSpot/spot*100 = put * (1 - (coupons+interest)/notional). (put already in %)
+  const bePct = put>0 ? put * (1 - (totalCpnIfHeld + interestEarned)/notional) : 0;
+  return {perCpn,totalCpnIfHeld,shares,strikePx,put,spot,cdates:cdates.length,cpnByFirstObs,firstObsMonths,notional,ccy:o.ccy,
+    beSpot,bePct,rfRate:r,interestEarned};
 }
