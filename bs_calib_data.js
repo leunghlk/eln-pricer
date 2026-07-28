@@ -9,4 +9,23 @@ const CALIB_ANCHOR = {"CRDO": 38, "LITE": 40, "LRCX": 40, "KLAC": 41, "MU": 41, 
 const CALIB_DEFAULT_ANCHOR = {"AMKR": 90, "DRAM": 90, "ARM": 90, "TSM": 90, "NVDA": 90, "1347": 85, "9618": 85, "388": 85, "ALAB": 90, "SKHY": 90, "SOXX": 90};
 const RICH_BS = {"AAPL": {"beta": {"0.9074": 5.7286, "0.95": 5.0058}, "cb": {"0.9074": 0.71, "0.95": 0.7}, "ms": 7.27}, "700": {"beta": {"0.881": 5.1803, "0.95": 4.8311}, "cb": {"0.881": 0.08, "0.95": 0.25}, "ms": 7.28}, "SNDK": {"beta": {"0.4": 15.2283, "0.5": 13.415}, "cb": {"0.4": -0.55, "0.5": -1.47}, "ms": 6.61}, "9988": {"beta": {"0.7": 7.5959, "0.95": 4.8032}, "cb": {"0.7": 0.02, "0.95": 0.36}, "ms": 7.37}};
 const NO_IV_FALLBACK = [];
-if (typeof module!=='undefined') module.exports={BS_T,BS_R,BLOOMBERG_IV,CALIB_ANCHOR,CALIB_DEFAULT_ANCHOR,RICH_BS,NO_IV_FALLBACK};
+// ---- FinIQ linear calibration (Kathy's FinIQ quote grids, fitted by least squares) ----
+// put% = b0 + FO[lockMonths] + KC*g(call) + KM*(mb-1) + KX*(mb-1)*g(call)
+//   g(call) = max(0,(90-call)/10)^2   (0 for call>=90, convex below)
+//   lockMonths: monthly=1, bi-monthly=2, quarterly=3, semi=6, annual=12
+//   FO[1]=0 by reference; 24M excluded (FinIQ grids inconsistent / no-quotation).
+//   Stocks NOT listed here fall back to the BS model.
+const FINIQ_COEF = {
+  "SNDK": {"b0":41.6634,"FO2":-1.7911,"FO3":-6.5144,"FO6":-14.7161,"FO12":0,"KC":1.3066,"KM":3.7021,"KX":0.3427},
+  "DRAM": {"b0":58.9255,"FO2":-2.5546,"FO3":-6.3158,"FO6":-5.8971,"FO12":0,"KC":2.6252,"KM":4.9321,"KX":0.9664}
+};
+const FINIQ_LOCK = { monthly:1, bi:2, bimonthly:2, bim:2, quarterly:3, semi:6, annual:12 };
+function finiqPut(tk, call, mb, cfreq){
+  const c = FINIQ_COEF[tk]; if(!c) return null;
+  const L = FINIQ_LOCK[String(cfreq).toLowerCase()] || 1;
+  const fo = L===2?c.FO2 : L===3?c.FO3 : L===6?c.FO6 : L===12?c.FO12 : 0;
+  const d = Math.max(0, (90-call)/10); const g = d*d;
+  let put = c.b0 + fo + c.KC*g + c.KM*(mb-1) + c.KX*(mb-1)*g;
+  return put; // raw; caller clamps + <40 check
+}
+if (typeof module!=='undefined') module.exports={BS_T,BS_R,BLOOMBERG_IV,CALIB_ANCHOR,CALIB_DEFAULT_ANCHOR,RICH_BS,NO_IV_FALLBACK,FINIQ_COEF,FINIQ_LOCK,finiqPut};

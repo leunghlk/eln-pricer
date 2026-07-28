@@ -36,6 +36,12 @@ const BLOOMBERG_FALLBACK = {
   "9618":0.3616,"9988":0.4446,"700":0.3381,"5":0.2617,"2388":0.2377,"388":0.2349,
   "ALAB":1.1223,"SKHY":1.0948,"SOXX":0.6012,
 };
+// 統一 lookup：去 .HK 尾、去前導 0，再 fallback 原 key
+function bloombergFallbackIv(sym){
+  if(!sym) return null;
+  const k = sym.replace(/\.HK$/i,"").replace(/^0+/,"");
+  return BLOOMBERG_FALLBACK[k] ?? BLOOMBERG_FALLBACK[sym] ?? null;
+}
 
 async function ensureCrumb(force) {
   const fresh = Date.now() - CRUMB_TS < 30 * 60 * 1000; // 30 分鐘
@@ -172,6 +178,13 @@ export default {
           }
         }
         if (!chain || !chain.optionChain || !chain.optionChain[0]) {
+          // Yahoo chain 攞唔到（crumb/Yahoo 封鎖）→ fallback Bloomberg（DELL/ASX 呢類）
+          const bb = bloombergFallbackIv(symbol);
+          if (bb != null) {
+            const data = { symbol, iv_pct: +(bb*100).toFixed(2), tenor_months: 3, atm_strike: null, source: "bloomberg_fallback", note: "Yahoo option chain unavailable → used Bloomberg 3M 100%-moneyness IV" };
+            IVY_CACHE.set(cacheKey, { ts: Date.now(), data });
+            return json(data);
+          }
           return json({ error: "no_option_chain", symbol }, 502);
         }
         const oc = chain.optionChain[0];
@@ -217,7 +230,7 @@ export default {
         const tenorMonths = +((exp - now) / (30.44 * 24 * 3600)).toFixed(2);
         if (iv == null || !(iv > 0)) {
           // 4) Yahoo 返 0 / 搵唔到 → fallback Bloomberg 名單
-          const bb = BLOOMBERG_FALLBACK[symbol.replace(/\.HK$/i, "").replace(/^0+/, "")] ?? BLOOMBERG_FALLBACK[symbol];
+          const bb = bloombergFallbackIv(symbol);
           if (bb != null) {
             const data = { symbol, iv_pct: +(bb * 100).toFixed(2), tenor_months: 3, atm_strike: atmStrike, source: "bloomberg_fallback", yahoo_iv: null, note: "Yahoo returned 0/NA → used Bloomberg 3M 100%-moneyness IV" };
             IVY_CACHE.set(cacheKey, { ts: Date.now(), data });

@@ -414,6 +414,33 @@ function recompute(){
    }
  }
     else {
+      // ---- US single: FinIQ linear calibration PRIMARY for calibrated stocks (SNDK/DRAM) ----
+      // NOTE: FinIQ model already encodes the call & MB & freq effects — do NOT apply callAdj on top.
+      const tk=normSym(p.ticker);
+      const fiRaw=(typeof finiqPut!=='undefined')?finiqPut(tk,p.call,p.mb,p.cfreq):null;
+      if(fiRaw!=null){
+        if(p.tenor>=24){ // 24M excluded from FinIQ fit → no quotation
+          calibHit={put:null,coupon:hasCoupon?p.coupon:null,src:"FinIQ (no quotation @24M)",noQuote:true};
+        } else if(fiRaw<40){ // FinIQ floor: sub-40% strikes are not quoted
+          calibHit={put:null,coupon:hasCoupon?p.coupon:null,src:"FinIQ (<40% no quotation)",noQuote:true};
+        } else {
+          const fiPut=Math.min(99,Math.max(40,fiRaw));
+          if(!hasPut && hasCoupon){ calibHit={put:+fiPut.toFixed(2), coupon:p.coupon, src:"FinIQ linear (SNDK/DRAM)"}; }
+          else if(!hasCoupon && hasPut){
+            // invert FinIQ to get coupon: treat put as fixed, solve coupon by scanning
+            const c=FINIQ_COEF[tk]; const L=FINIQ_LOCK[String(p.cfreq).toLowerCase()]||1;
+            const fo=L===2?c.FO2:L===3?c.FO3:L===6?c.FO6:L===12?c.FO12:0;
+            const d=Math.max(0,(90-p.call)/10); const g=d*d;
+            // fiRaw(KM, KX depend on mb) — for coupon solve keep mb fixed, rearrange:
+            // put = b0+fo+KC*g + KM*(mb-1)+KX*(mb-1)*g  (put independent of coupon in this model)
+            // => cannot solve coupon from put uniquely without MB; use BS inverse for coupon instead.
+            const r=calibBsSingleCoupon(tk,p.put,p.mb,p.call,p.tenor,p.cfreq);
+            if(r) calibHit={put:p.put,coupon:r.coupon,src:r.src};
+          }
+          else if(!hasCoupon && !hasPut){ calibHit={put:+fiPut.toFixed(2), coupon:8, src:"FinIQ linear (SNDK/DRAM) 預設8%"}; }
+        }
+      }
+      if(!calibHit){
       // ---- US single: BS (Bloomberg IV) PRIMARY, then FinIQ table, then live IV model ----
       const cA=callAdj(p.call);
       if(bsCalibAvailable(p.ticker)){
@@ -433,6 +460,7 @@ function recompute(){
           if(v!=null)calibHit={put:+(v*cA).toFixed(2),coupon:8,src:"FinIQ US single (預設8%)"};
         }
       }
+      } // end FinIQ-fallback BS block
       // not in any calib → fall through to live IV model (solveParams)
     }
   }catch(e){}
@@ -463,6 +491,29 @@ function recompute(){
                  en:`⚠ Client coupon below the minimum required: the minimum coupon for this structure is ${pct(minC)} (basis: 12 ÷ ${p.tenor} months × MB ${pct(p.mb)}). The computed ${pct(calibHit.coupon)} is below the floor — the RM cannot retain more than the client's yield. Raise the coupon or lower the MB, otherwise the trade is not viable.`};
         $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
       }
+    }
+    // ---- Non-call (lock-out) period cannot exceed tenor ----
+    // non-call months derived from coupon frequency: monthly=1, bi-monthly=2, quarterly=3, semi=6, annual=12
+    const NC_MAP = { monthly:1, bi:2, bimonthly:2, quarterly:3, semi:6, annual:12 };
+    const nonCall = NC_MAP[String(p.cfreq).toLowerCase()] || 1;
+    if(nonCall > p.tenor + 1e-9){
+      const m={tc:`⚠ 禁 Call 期（${nonCall} 個月）不可長於 Tenor（${p.tenor} 個月）。請縮短禁 Call 期或延長 Tenor。`,
+               sc:`⚠ 禁 Call 期（${nonCall} 个月）不可长于 Tenor（${p.tenor} 个月）。请缩短禁 Call 期或延长 Tenor。`,
+               en:`⚠ The non-call period (${nonCall} months) cannot exceed the tenor (${p.tenor} months). Shorten the non-call period or extend the tenor.`};
+      $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+    }
+    // ---- <40% floor: FinIQ does not quote strikes below 40% ----
+    if(calibHit.noQuote){
+      const m={tc:`⚠ 此條款組合 FinIQ 未有報價（計得行使價低於 40% 或該 Tenor 不適用），不應以低於 40% strike 視作可成交。請調整條款（如提高 coupon / 降低 MB / 縮短禁 Call 期）。`,
+               sc:`⚠ 此条款组合 FinIQ 未有报价（计得行使价低于 40% 或该 Tenor 不适用），不应以低于 40% strike 视作可成交。请调整条款（如提高 coupon / 降低 MB / 缩短禁 Call 期）。`,
+               en:`⚠ No FinIQ quote for this combination (computed strike < 40% or tenor not applicable). Strikes below 40% are not quoted — adjust terms (raise coupon / lower MB / shorten non-call).`};
+      $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+    } else if(calibHit.put!=null && calibHit.put<40){
+      const m={tc:`⚠ 計得行使價 ${calibHit.put}% 低於 40%——FinIQ 不會以此低 strike 報價，實盤不可行。請調高 coupon 或降低 MB。`,
+               sc:`⚠ 计得行使价 ${calibHit.put}% 低于 40%——FinIQ 不会以此低 strike 报价，实盘不可行。请调高 coupon 或降低 MB。`,
+               en:`⚠ Computed strike ${calibHit.put}% is below 40% — FinIQ does not quote strikes this low; not dealable. Raise the coupon or lower the MB.`};
+      $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+      calibHit.put=null;
     }
   }
 
