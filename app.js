@@ -568,7 +568,7 @@ function renderScenarios(S,p,out){
   const rows=[
     {t:T("sc1"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.cpnByFirstObs,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(S.firstObsMonths/12)*100),cls:"good"},
-    {t:T("sc2"),called:T("yes"),cpn:`${T("cpnAccrued")} = ${T("cCoupon")} × ${(S.cpnByFirstObs/Math.max(1e-9,S.perCpn)).toFixed(0)} 期`,
+    {t:T("sc2"),called:T("yes"),cpn:`${T("cpnAccrued")} = ${T("perCpnLine")} × 已派期數`,
      prin:T("prinBack"),ret:"+"+sym(p.ccy)+fmt(S.cpnByFirstObs,0),cls:"good"},
     {t:T("sc3"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.totalCpnIfHeld,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(p.tenor/12)*100),cls:"good"},
@@ -709,6 +709,17 @@ function saveSnapshot(){
   }
   y=chY+chH+24;
 
+  // --- chart sub-notes: put level (lvlnote) + SMA legend — right below the chart ---
+  if(CHARTS[0] && CHARTS[0]._lvlNote && CHARTS[0]._lvlNote.innerText.trim()){
+    y+=4; g.fillStyle="#cfe0ff"; g.font="15px Arial";
+    wrapLines(g, CHARTS[0]._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
+  }
+  if(SMA_ON){
+    y+=4; g.fillStyle="#f5c542"; g.font="bold 15px Arial";
+    g.fillText(`📈 ${$("smaN").value} SMA overlay`,ML,y); y+=22;
+  }
+  y+=8;
+
   // --- Section 2: scenario table ---
   g.fillStyle="#cfe0ff"; g.font="bold 14px Arial";
   g.fillText("2 · Scenario Analysis (estimated)",ML,y); y+=8;
@@ -739,26 +750,37 @@ function saveSnapshot(){
     y+=maxLines*lh+10;
   });
 
-  // --- chart sub-notes: put level (lvlnote) + SMA legend ---
-  if(CHARTS[0] && CHARTS[0]._lvlNote && CHARTS[0]._lvlNote.innerText.trim()){
-    y+=6; g.fillStyle="#cfe0ff"; g.font="15px Arial";
-    wrapLines(g, CHARTS[0]._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
-  }
-  if(SMA_ON){
-    y+=4; g.fillStyle="#f5c542"; g.font="bold 15px Arial";
-    g.fillText(`📈 ${$("smaN").value} SMA overlay`,ML,y); y+=22;
-  }
-
-  // --- Coupon & Observation Arrangement (mirrors on-screen scnDetail) ---
+  // --- Coupon & Observation Arrangement (mirrors on-screen scnDetail grid) ---
   y+=14;
   g.fillStyle="#f5c542"; g.font="bold 19px Arial";
   g.fillText(LANG==="en"?"Coupon & Observation Arrangement":(LANG==="sc"?"票息与收回安排":"票息與收回安排"),ML,y);
-  y+=26;
-  g.fillStyle="#cfe0ff"; g.font="16px Arial";
-  const detRaw=(($("scnDetail").innerText)||"").replace(/\r/g,"").split("\n").map(s=>s.trim()).filter(Boolean);
-  detRaw.slice(1).forEach(raw=>{   // slice(1): skip the first heading line (we drew it above)
-    wrapLines(g,raw,MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=24; });
-    y+=4;
+  y+=30;
+  const KVW=210;                       // label column width
+  const det=$("scnDetail");
+  [...det.children].forEach(ch=>{
+    const cls=(ch.className||"");
+    if(cls.includes("scnhead")) return;          // main title already drawn above
+    if(cls.includes("scnhead2")){                 // section sub-header
+      y+=8; g.fillStyle="#f5c542"; g.font="bold 16px Arial";
+      g.fillText(ch.innerText.trim(),ML,y); y+=26; return;
+    }
+    if(cls.includes("kv")){                        // key-value grid row(s)
+      const kvs=[...ch.children];
+      for(let i=0;i+1<kvs.length;i+=2){
+        const k=kvs[i].innerText.trim(), v=kvs[i+1].innerText.trim();
+        g.fillStyle="#9fb3d1"; g.font="15px Arial"; g.textAlign="right";
+        g.fillText(k, ML+KVW, y);
+        g.textAlign="left"; g.fillStyle="#eaf2ff"; g.font="15px Arial";
+        wrapLines(g,v,MR-(ML+KVW+12)).forEach((ln,k2)=>{ g.fillText(ln,ML+KVW+12,y+k2*22); });
+        y+=22*Math.max(1,wrapLines(g,v,MR-(ML+KVW+12)).length)+4;
+      }
+      return;
+    }
+    if(cls.includes("warn")){                      // risk warning line
+      g.fillStyle="#f5c542"; g.font="15px Arial";
+      wrapLines(g,ch.innerText.trim(),MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
+      y+=4; return;
+    }
   });
 
   // --- footnote ---
