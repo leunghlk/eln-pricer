@@ -97,67 +97,54 @@ function sampleCandles(days){
   return arr;
 }
 
-// ---- OPTION IV (at target strike + ATM) via Worker → Yahoo option chain ----
+// ---- OPTION IV: primary = Worker /iv-cboe (CBOE 30d implied IV, key-free, accurate) ----
+//   fallback 1: /iv-yahoo (Yahoo 3M ATM implied IV; currently Yahoo rate-limited)
+//   fallback 2: /iv (90日 realized vol, 自動, 唔使 Yahoo crumb)
+//   fallback 3: 靜態 BLOOMBERG_IV (worker 死機時 offline 後備)
+//   fallback 4: sample
+//   HK 冇 CBOE/Yahoo options → 自動落 /iv (realized) → BLOOMBERG_IV
 // Returns {atm, atStrike, spot, source, expiry, strikeUsed}
-// 港股：Yahoo options 冇 data → 改用 /iv（90日 realized vol，自動更新）做 IV proxy。
-// 美股：Yahoo options chain（真實 implied IV）。攞唔到先 fallback sample。
 async function fetchIV(input, tenorMonths, strikePct){
   const y=usSym(input);
-  // 港股優先用 auto realized vol（/iv endpoint），每日經 Worker 日線自動計
-  if(isHK(y)){
-    try{
-      const r=await fetch(`${WORKER_URL}/iv?symbol=${encodeURIComponent(y)}&window=90`);
-      const j=await r.json();
-      if(j && j.realized_iv_pct!=null){
-        const iv=j.realized_iv_pct/100;
-        return {atm:iv, atStrike:iv, spot:null, source:"auto", expiry:j.as_of, strikeUsed:null, autoWindow:"90d"};
-      }
-    }catch(e){}
-    // fallback：/iv 都攞唔到 → sample（極少，通常係 Yahoo 日線 gap）
-    const seed=0.30+Math.random()*0.25;
-    return {atm:seed, atStrike:seed, spot:null, source:"sample", expiry:null, strikeUsed:null};
-  }
+  const tk=normSym(y);
+  // ---- 1) Worker /iv-cboe (primary, CBOE 30d implied IV) ----
   try{
-    // 1) 攞到期日列表（default chain 已含最近到期）
-    const r0=await fetch(`${WORKER_URL}/options?symbol=${encodeURIComponent(y)}`);
-    const j0=await r0.json();
-    const res0=j0&&j0.optionChain&&j0.optionChain.result&&j0.optionChain.result[0];
-    if(res0){
-      const exps=res0.expirationDates||[];
-      const spot=res0.quote&&(res0.quote.regularMarketPrice||res0.quote.postMarketPrice);
-      const now=Math.floor(Date.now()/1000);
-      const targetDate=tenorMonths*30;
-      let best=null,bestDiff=1e9;
-      exps.forEach(t=>{const dte=(t-now)/86400;const diff=Math.abs(dte-targetDate);
-        if(dte>3&&diff<bestDiff){bestDiff=diff;best=t;}});
-      let chain=res0;
-      if(best && exps.length){
-        const r1=await fetch(`${WORKER_URL}/options?symbol=${encodeURIComponent(y)}&date=${best}`);
-        const j1=await r1.json();
-        chain=(j1&&j1.optionChain&&j1.optionChain.result&&j1.optionChain.result[0])||res0;
-      }
-      const opt=chain.options&&chain.options[0];
-      const puts=(opt&&opt.puts)||[];
-      const sp=spot||(chain.quote&&chain.quote.regularMarketPrice);
-      if(puts.length&&sp){
-        const kTarget=sp*(strikePct/100);
-        let iAtm=-1,iK=-1,dA=1e9,dK=1e9;
-        puts.forEach((p,i)=>{
-          if(p.impliedVolatility==null||!p.strike)return;
-          if(Math.abs(p.strike-sp)<dA){dA=Math.abs(p.strike-sp);iAtm=i;}
-          if(Math.abs(p.strike-kTarget)<dK){dK=Math.abs(p.strike-kTarget);iK=i;}
-        });
-        if(iAtm>=0){
-          const expDate=new Date((opt.expirationDate||best)*1000).toISOString().slice(0,10);
-          return {atm:puts[iAtm].impliedVolatility,
-                  atStrike:iK>=0?puts[iK].impliedVolatility:puts[iAtm].impliedVolatility,
-                  spot:sp, source:"live", expiry:expDate,
-                  strikeUsed:iK>=0?puts[iK].strike:puts[iAtm].strike};
-        }
-      }
+    const r=await fetch(`${WORKER_URL}/iv-cboe?symbol=${encodeURIComponent(y)}`);
+    const j=await r.json();
+    if(j && j.iv_pct!=null && j.iv_pct>0){
+      const iv=j.iv_pct/100;
+      return {atm:iv, atStrike:iv, spot:j.spot||null,
+        source:"cboe_iv30", expiry:"30d IV", strikeUsed:null,
+        worker_source:j.source, as_of:j.as_of};
     }
   }catch(e){}
-  // no live IV → seeded sample by sector vol
-  const seed = 0.42 + Math.random()*0.15;
-  return {atm:seed, atStrike:seed*1.35, spot:null, source:"sample", expiry:null, strikeUsed:null};
+  // ---- 2) Worker /iv-yahoo (Yahoo 3M ATM implied IV) ----
+  try{
+    const r=await fetch(`${WORKER_URL}/iv-yahoo?symbol=${encodeURIComponent(y)}`);
+    const j=await r.json();
+    if(j && j.iv_pct!=null && j.iv_pct>0){
+      const iv=j.iv_pct/100;
+      return {atm:iv, atStrike:iv, spot:null,
+        source: j.source==="bloomberg_fallback" ? "bloomberg_fallback" : "worker_auto",
+        expiry:"3M ATM", strikeUsed:null,
+        worker_source: j.source, atm_strike: j.atm_strike||null};
+    }
+  }catch(e){}
+  // ---- 3) /iv (90日 realized vol, 自動, 唔使 Yahoo options crumb) ----
+  try{
+    const r=await fetch(`${WORKER_URL}/iv?symbol=${encodeURIComponent(y)}&window=90`);
+    const j=await r.json();
+    if(j && j.realized_iv_pct!=null){
+      const iv=j.realized_iv_pct/100;
+      return {atm:iv, atStrike:iv, spot:null, source:"auto", expiry:j.as_of, strikeUsed:null, autoWindow:"90d"};
+    }
+  }catch(e){}
+  // ---- 4) Offline 後備: 靜態 BLOOMBERG_IV ----
+  const bbg=(typeof BLOOMBERG_IV!=='undefined')?BLOOMBERG_IV[tk]:null;
+  if(bbg && bbg>0){
+    return {atm:bbg, atStrike:bbg, spot:null, source:"bloomberg_offline", expiry:"3M 100%-moneyness", strikeUsed:null};
+  }
+  // ---- 5) 最後: sample ----
+  const seed=0.30+Math.random()*0.25;
+  return {atm:seed, atStrike:seed, spot:null, source:"sample", expiry:null, strikeUsed:null};
 }

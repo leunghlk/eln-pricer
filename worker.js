@@ -22,6 +22,20 @@ const CORS = {
 
 // 快取 crumb/cookie（Worker 全域，冷啟動後重取）
 let CRUMB = null, COOKIE = null, CRUMB_TS = 0;
+// /iv-yahoo per-ticker cache
+const IVY_CACHE = new Map();
+// /iv-cboe per-ticker cache
+const CB_CACHE = new Map();
+// Bloomberg 3M 100%-moneyness IV fallback（與 bs_calib_data.js 一致；Yahoo 返 0 時用）
+const BLOOMBERG_FALLBACK = {
+  "CRDO":1.1122,"LITE":0.9968,"AMKR":0.9849,"COHR":0.9777,"DRAM":0.9496,"ARM":0.9496,
+  "MRVL":0.9147,"MU":0.9073,"KLAC":0.8952,"ASX":0.8782,"LRCX":0.8684,"AMAT":0.8558,
+  "DELL":0.8532,"INTC":0.8091,"AMD":0.7547,"TSM":0.4917,"NVDA":0.4274,
+  "SNDK":1.2053,"AAPL":0.280194,
+  "1347":0.9059,"992":0.6366,"9992":0.4818,"3690":0.4483,"1211":0.4037,"9999":0.3871,
+  "9618":0.3616,"9988":0.4446,"700":0.3381,"5":0.2617,"2388":0.2377,"388":0.2349,
+  "ALAB":1.1223,"SKHY":1.0948,"SOXX":0.6012,
+};
 
 async function ensureCrumb(force) {
   const fresh = Date.now() - CRUMB_TS < 30 * 60 * 1000; // 30 分鐘
@@ -89,7 +103,7 @@ export default {
     const path = url.pathname.replace(/\/+$/, "");
     try {
       if (path === "" || path === "/") {
-        return json({ ok: true, service: "eln-proxy", endpoints: ["/chart", "/options", "/iv"] });
+        return json({ ok: true, service: "eln-proxy", endpoints: ["/chart", "/options", "/iv", "/iv-yahoo", "/iv-cboe"] });
       }
       if (path === "/chart") {
         const symbol = url.searchParams.get("symbol");
@@ -134,6 +148,112 @@ export default {
         const vol = realizedVol(closes, win);
         if (!vol) return json({ error: "insufficient_bars" }, 422);
         return json({ symbol: res.meta && res.meta.symbol, ...vol, source: "yahoo_realized_vol" });
+      }
+      // /iv-yahoo — 從 Yahoo option chain 抽 3M ATM IV（自動化 IV，免人手手抄）
+      //   DELL/ASX 等 Yahoo 返 impliedVolatility=0 嘅，fallback 去 Bloomberg 名單
+      if (path === "/iv-yahoo") {
+        const symbol = (url.searchParams.get("symbol") || "").toUpperCase();
+        if (!symbol) return json({ error: "symbol required" }, 400);
+        // per-ticker cache（60 分鐘）
+        const cacheKey = "ivy:" + symbol;
+        const cached = IVY_CACHE.get(cacheKey);
+        if (cached && Date.now() - cached.ts < 60 * 60 * 1000) {
+          return json({ ...cached.data, cached: true });
+        }
+        // 1) 攞 Yahoo option chain
+        let chain = null;
+        for (let attempt = 0; attempt < 2 && !chain; attempt++) {
+          await ensureCrumb(attempt === 1);
+          const y = `https://query1.finance.yahoo.com/v7/finance/options/${encodeURIComponent(symbol)}?crumb=${encodeURIComponent(CRUMB || "")}`;
+          const r = await fetch(y, { headers: { "User-Agent": UA, "Cookie": COOKIE || "" } });
+          const txt = await r.text();
+          if (!txt.includes("Invalid Crumb") && !txt.includes("Unauthorized")) {
+            try { chain = JSON.parse(txt); } catch (e) { chain = null; }
+          }
+        }
+        if (!chain || !chain.optionChain || !chain.optionChain[0]) {
+          return json({ error: "no_option_chain", symbol }, 502);
+        }
+        const oc = chain.optionChain[0];
+        const expirations = oc.expirationDates || [];
+        if (!expirations.length) return json({ error: "no_expirations", symbol }, 422);
+        // 2) 揀最接近 3 個月（90 日）嘅到期日
+        const now = Math.floor(Date.now() / 1000);
+        const target = now + 90 * 24 * 3600;
+        let exp = expirations[0], best = Infinity;
+        for (const e of expirations) {
+          const diff = Math.abs(e - target);
+          if (diff < best) { best = diff; exp = e; }
+        }
+        // 揀該到期日嘅 chain（若 Yahoo 未載入該日，重攞一次）
+        let calls = oc.options && oc.options.find(o => o.expirationDate === exp && o.calls) ? oc.options.find(o => o.expirationDate === exp).calls : null;
+        let puts = oc.options && oc.options.find(o => o.expirationDate === exp && o.puts) ? oc.options.find(o => o.expirationDate === exp).puts : null;
+        if (!calls || !puts) {
+          const y2 = `https://query1.finance.yahoo.com/v7/finance/options/${encodeURIComponent(symbol)}?crumb=${encodeURIComponent(CRUMB || "")}&date=${exp}`;
+          const r2 = await fetch(y2, { headers: { "User-Agent": UA, "Cookie": COOKIE || "" } });
+          try { const c2 = JSON.parse(await r2.text()); const oc2 = c2.optionChain && c2.optionChain[0];
+            calls = oc2 && oc2.options && oc2.options[0] && oc2.options[0].calls;
+            puts  = oc2 && oc2.options && oc2.options[0] && oc2.options[0].puts;
+          } catch (e) {}
+        }
+        if (!calls || !puts || !calls.length || !puts.length) {
+          return json({ error: "no_contracts", symbol, exp }, 422);
+        }
+        // 3) 計 ATM strike（用 underlying 或 call/put strike 中間）
+        const und = (oc.quote && oc.quote.regularMarketPrice) || (calls[0] && calls[0].strike);
+        const atmStrike = und || calls[Math.floor(calls.length / 2)].strike;
+        // 搵 ATM 附近（±5% strike）call/put IV，取平均
+        function atmIv(arr) {
+          const near = arr.filter(o => o.strike >= atmStrike * 0.95 && o.strike <= atmStrike * 1.05 && o.impliedVolatility > 0);
+          if (!near.length) return null;
+          const avg = near.reduce((a, o) => a + o.impliedVolatility, 0) / near.length;
+          return avg;
+        }
+        const ivC = atmIv(calls), ivP = atmIv(puts);
+        let iv = null;
+        if (ivC != null && ivP != null) iv = (ivC + ivP) / 2;
+        else if (ivC != null) iv = ivC;
+        else if (ivP != null) iv = ivP;
+        const tenorMonths = +((exp - now) / (30.44 * 24 * 3600)).toFixed(2);
+        if (iv == null || !(iv > 0)) {
+          // 4) Yahoo 返 0 / 搵唔到 → fallback Bloomberg 名單
+          const bb = BLOOMBERG_FALLBACK[symbol.replace(/\.HK$/i, "").replace(/^0+/, "")] ?? BLOOMBERG_FALLBACK[symbol];
+          if (bb != null) {
+            const data = { symbol, iv_pct: +(bb * 100).toFixed(2), tenor_months: 3, atm_strike: atmStrike, source: "bloomberg_fallback", yahoo_iv: null, note: "Yahoo returned 0/NA → used Bloomberg 3M 100%-moneyness IV" };
+            IVY_CACHE.set(cacheKey, { ts: Date.now(), data });
+            return json(data);
+          }
+          return json({ error: "no_valid_iv", symbol, yahoo_iv: null, atm_strike: atmStrike }, 422);
+        }
+        const data = { symbol, iv_pct: +(iv * 100).toFixed(2), tenor_months: tenorMonths, atm_strike: atmStrike, source: "yahoo_options_atm_3m", yahoo_iv: +(iv * 100).toFixed(2) };
+        IVY_CACHE.set(cacheKey, { ts: Date.now(), data });
+        return json(data);
+      }
+      // /iv-cboe — CBOE delayed options: 30-day implied IV (iv30) + spot. Key-free, no crumb.
+      //   Most accurate free implied-IV source; covers all US stocks. HK not on CBOE → caller falls back.
+      if (path === "/iv-cboe") {
+        const symbol = (url.searchParams.get("symbol") || "").toUpperCase().replace(/\.HK$/i, "");
+        if (!symbol) return json({ error: "symbol required" }, 400);
+        const cacheKey = "cboe:" + symbol;
+        const cached = CB_CACHE.get(cacheKey);
+        if (cached && Date.now() - cached.ts < 30 * 60 * 1000) {
+          return json({ ...cached.data, cached: true });
+        }
+        const r = await fetch(`https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(symbol)}.json`, { headers: { "User-Agent": UA } });
+        const j = await r.json().catch(() => null);
+        if (!j || !j.data || j.data.iv30 == null) {
+          return json({ error: "no_cboe_data", symbol }, 404);
+        }
+        const data = {
+          symbol,
+          iv_pct: +(j.data.iv30).toFixed(2),
+          spot: j.data.current_price != null ? +j.data.current_price : null,
+          tenor_months: 1,            // iv30 = 30-day implied vol
+          source: "cboe_iv30",
+          as_of: j.data.last_trade_time || new Date().toISOString().slice(0, 10),
+        };
+        CB_CACHE.set(cacheKey, { ts: Date.now(), data });
+        return json(data);
       }
       return json({ error: "unknown path", path }, 404);
     } catch (e) {

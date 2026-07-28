@@ -196,8 +196,9 @@ async function loadIV(){
     // basket: fetch IV for EVERY component
     const results=await Promise.all(BASKET.map(s=>fetchIV(s,p.tenor,strikeGuess).catch(()=>null)));
     BASKET_IV=results.map((r,i)=>({sym:BASKET[i],ivK:r?r.atStrike:null,ivA:r?r.atm:null,src:r?r.source:"none",expiry:r?r.expiry:null,spot:r?r.spot:null,strikeUsed:r?r.strikeUsed:null})).filter(x=>x.ivK!=null);
-    // pricing driver = highest-vol component (worst-of)
-    const live=BASKET_IV.filter(x=>x.src==="live");
+    // pricing driver = highest-vol component (worst-of); real sources = live/worker_auto/bloomberg*
+    const isRealSrc = x => ["live","worker_auto","bloomberg","bloomberg_fallback","bloomberg_offline","cboe_iv30"].includes(x.src);
+    const live=BASKET_IV.filter(isRealSrc);
     const drv=(live.length?live:BASKET_IV).slice().sort((a,b)=>b.ivK-a.ivK)[0];
     LAST_IV = drv ? {atm:drv.ivA,atStrike:drv.ivK,spot:drv.spot,source:drv.src,expiry:drv.expiry,strikeUsed:drv.strikeUsed} : {atm:0.5,atStrike:0.6,source:"sample"};
     renderBasketIV(BASKET_IV, drv);
@@ -215,10 +216,18 @@ function renderBasketIV(list, drv){
   list.forEach(x=>{
     const isDrv = drv && x.sym===drv.sym;
     const el=document.createElement("div");el.className="bank"+(isDrv?" drv":"");
-    const srcLabel = x.src==="auto" ? ("auto "+ (x.autoWindow||"90d")) : (x.src==="live" ? ("live · "+(x.expiry||"")) : "sample");
+    const isRealSrc = ["live","worker_auto","bloomberg","bloomberg_fallback","bloomberg_offline","cboe_iv30"].includes(x.src);
+    const srcLabel = x.src==="auto" ? ("auto "+(x.autoWindow||"90d"))
+                   : x.src==="live" ? ("live · "+(x.expiry||""))
+                   : x.src==="worker_auto" ? "auto · Yahoo 3M ATM"
+                   : x.src==="cboe_iv30" ? "CBOE 30d IV"
+                   : x.src==="bloomberg" ? "Bloomberg · 3M 100%-mn"
+                   : x.src==="bloomberg_fallback" ? "Bloomberg (fallback)"
+                   : x.src==="bloomberg_offline" ? "Bloomberg (offline)"
+                   : "sample";
     el.innerHTML=`<div class="n">${x.sym}${isDrv?" ★":""}</div><div class="iv">${pct(x.ivA*100,1)}</div>`
       +`<div class="m">ATM IV · strike IV ${pct(x.ivK*100,1)}</div>`
-      +`<div class="st ${x.src==='live'?'live':(x.src==='auto'?'live':'samp')}">${srcLabel}</div>`;
+      +`<div class="st ${isRealSrc?'live':'samp'}">${srcLabel}</div>`;
     box.appendChild(el);
   });
   if(!list.length){
@@ -233,7 +242,7 @@ function renderBasketIV(list, drv){
   }else{
     note=`✅ 籃子內各股真實 IV（自動更新）：${names}。Worst-of 定價由 <b>${drv?drv.sym:"—"}</b>（最高 IV）主導。`;
   }
-  const anySample=list.some(x=>x.src!=="live"&&x.src!=="auto");
+  const anySample=list.some(x=>!["live","worker_auto","bloomberg","bloomberg_fallback","bloomberg_offline","auto"].includes(x.src));
   if(anySample){
     note += LANG==="en" ? " ⚠ Components without live/auto IV use calibrated table pricing."
          : LANG==="sc" ? " ⚠ 无 live/auto IV 之成分股以校准表定价。"
@@ -247,17 +256,39 @@ function renderBanks(iv){
   const banks=["HSBC","JPM","BNP","UBS","SG","Barclays"];
   const seeds={HSBC:1.0,JPM:0.98,BNP:1.05,UBS:1.02,SG:1.08,Barclays:1.03};
   const base=iv.atm||0.5;
+  const isReal = iv.source==='live'||iv.source==='bloomberg'||iv.source==='worker_auto'||iv.source==='bloomberg_fallback'||iv.source==='bloomberg_offline'||iv.source==='cboe_iv30';
+  const srcClass = isReal ? 'live' : 'samp';
+  const srcLabel = iv.source==='live' ? ('live · '+(iv.expiry||''))
+                 : iv.source==='worker_auto' ? ('auto · Yahoo 3M ATM'+(iv.expiry||''))
+                 : iv.source==='cboe_iv30' ? ('CBOE 30d IV'+(iv.as_of?' · '+iv.as_of:''))
+                 : iv.source==='bloomberg_fallback' ? ('Bloomberg (fallback) · 3M 100%-mn')
+                 : iv.source==='bloomberg' ? ('Bloomberg · '+(iv.expiry||''))
+                 : iv.source==='bloomberg_offline' ? ('Bloomberg (offline) · 3M 100%-mn')
+                 : 'sample (seeded)';
   banks.forEach(b=>{
     const v=base*seeds[b]*(0.98+Math.random()*0.04);
     const el=document.createElement("div");el.className="bank";
     el.innerHTML=`<div class="n">${b}</div><div class="iv">${pct(v*100,1)}</div>`
-      +`<div class="m">ATM IV</div><div class="st ${iv.source==='live'?'live':'samp'}">`
-      +`${iv.source==='live'?('live · '+ (iv.expiry||'')):'sample (seeded)'}</div>`;
+      +`<div class="m">ATM IV</div><div class="st ${srcClass}">${srcLabel}</div>`;
     box.appendChild(el);
   });
   const atm=pct(iv.atm*100,1), stk=pct((iv.strikeUsed&&CUR.spot)?iv.strikeUsed/CUR.spot*100:0,0), stkiv=pct(iv.atStrike*100,1), exp=iv.expiry||"";
   let note;
-  if(iv.source==="live"){
+  const isBB = iv.source==="bloomberg"||iv.source==="bloomberg_fallback"||iv.source==="bloomberg_offline";
+  if(isBB){
+    const tag = iv.source==="bloomberg_fallback" ? "Bloomberg (fallback · Yahoo 0/NA)" : iv.source==="bloomberg_offline" ? "Bloomberg (offline 後備)" : "Bloomberg";
+    note = (LANG==="en")
+      ? `✅ ${tag} 3M 100%-moneyness IV · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>. Bank rows are indicative (spread-adjusted).`
+      : (LANG==="sc")
+      ? `✅ ${tag} 3个月 100% 价外 IV · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>。各行均为按惯例 spread 调整的 indicative。`
+      : `✅ ${tag} 3個月 100%-moneyness IV · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>。各行均為按慣例 spread 調整之 indicative。`;
+  } else if(iv.source==="cboe_iv30"){
+    note = (LANG==="en")
+      ? `✅ Auto IV (CBOE 30-day implied vol, key-free) · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · as of '+iv.as_of:''}. Bank rows are indicative (spread-adjusted).`
+      : (LANG==="sc")
+      ? `✅ 自动 IV（CBOE 30日 隐含波动率，免密钥）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · 截至 '+iv.as_of:''}。各行均为按惯例 spread 调整的 indicative。`
+      : `✅ 自動 IV（CBOE 30日 implied vol，免 key）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · 截至 '+iv.as_of:''}。各行均為按慣例 spread 調整之 indicative。`;
+  } else if(iv.source==="live"){
     note = (LANG==="en")
       ? `✅ Real Option IV (auto-updated via Yahoo) · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b> · expiry ${exp}. Bank rows are indicative (spread-adjusted).`
       : (LANG==="sc")
@@ -297,6 +328,13 @@ function recompute(){
   const hasPut=p.put!=null&&p.put!==""&&!isNaN(p.put);
   try{
     if(p.basket && BASKET.length>=2){
+      // ---- BS (Bloomberg IV, worst-of = highest-IV component) PRIMARY for basket ----
+      if(bsBasketDriver(BASKET)){
+        if(!hasPut && hasCoupon){const r=calibBsBasketPut(BASKET,p.coupon,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:+(r.put*callAdj(p.call)).toFixed(2),coupon:p.coupon,src:r.src};}
+        else if(!hasCoupon && hasPut){const r=calibBsBasketCoupon(BASKET,p.put,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:p.put,coupon:r.coupon,src:r.src};}
+        else if(!hasCoupon && !hasPut){const r=calibBsBasketPut(BASKET,18,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:+(r.put*callAdj(p.call)).toFixed(2),coupon:18,src:r.src};}
+      }
+      if(!calibHit){
       const isUsBk = calibUsBasketPut(BASKET,p.coupon||18,p.mb,p.tenor,p.call)!=null;
       if(isUsBk){
         if(!hasPut && hasCoupon){const r=calibUsBasketPut(BASKET,p.coupon,p.mb,p.tenor,p.call); if(r)calibHit={put:r.put,coupon:p.coupon,src:`FinIQ US basket${r.bank?' ('+r.bank+')':''}`};}
@@ -329,57 +367,72 @@ function recompute(){
           return;
         }
       }
+      } // end if(!calibHit)
     } else if(isHK(usSym(p.ticker))) {
-      // HK single — AUTO IV (90d realized vol) PRIMARY via √IV model.
-      // K calibrated from your FinIQ table anchor (8% MB1 = table) so static still governs the anchor.
-      const tk=normSym(p.ticker);
-      const ref=CALIB.hk_single_ref[tk];
-      if(ref!=null && LAST_IV && LAST_IV.atStrike){
-        // K = anchor_gross / (anchor_put% * √anchorIV); anchor gross = 8+mb
-        const ivK = (LAST_IV.atStrike||LAST_IV.atm||0.4);
-        const K = ( (8+p.mb)/100 ) / ( (ref/100) * Math.sqrt(Math.max(ivK,0.05)) );
-        const cA = callAdj(p.call);
-        const solveFromK=(gross)=> +( (gross/100) / ( Math.sqrt(Math.max(ivK,0.05)) * K * cA ) *100 ).toFixed(2);
-        const grossFromPut=(put)=> (put/100)*Math.sqrt(Math.max(ivK,0.05))*K*cA*100;
+   // HK single — BS (Bloomberg IV) PRIMARY when IV available + live spot known
+   if(bsCalibAvailable(p.ticker)){
+     const cA=callAdj(p.call);
+     if(!hasPut && hasCoupon){const r=calibBsSinglePut(p.ticker,p.coupon,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:+(r.put*cA).toFixed(2),coupon:p.coupon,src:r.src};}
+     else if(!hasCoupon && hasPut){const r=calibBsSingleCoupon(p.ticker,p.put,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:p.put,coupon:r.coupon,src:r.src};}
+     else if(!hasCoupon && !hasPut){const r=calibBsSinglePut(p.ticker,8,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:+(r.put*cA).toFixed(2),coupon:8,src:r.src+" (預設8%)"};}
+   }
+   if(!calibHit){
+   // HK single — AUTO IV (90d realized vol) fallback via √IV model.
+   const tk=normSym(p.ticker);
+   const ref=CALIB.hk_single_ref[tk];
+   if(ref!=null && LAST_IV && LAST_IV.atStrike){
+     // K = anchor_gross / (anchor_put% * √anchorIV); anchor gross = 8+mb
+     const ivK = (LAST_IV.atStrike||LAST_IV.atm||0.4);
+     const K = ( (8+p.mb)/100 ) / ( (ref/100) * Math.sqrt(Math.max(ivK,0.05)) );
+     const cA = callAdj(p.call);
+     const solveFromK=(gross)=> +( (gross/100) / ( Math.sqrt(Math.max(ivK,0.05)) * K * cA ) *100 ).toFixed(2);
+     const grossFromPut=(put)=> (put/100)*Math.sqrt(Math.max(ivK,0.05))*K*cA*100;
+     if(!hasPut && hasCoupon){
+       const g=(p.coupon+p.mb)/100*100; // gross% = coupon+mb
+       calibHit={put:solveFromK(p.coupon+p.mb), coupon:p.coupon, src:"Auto IV (√IV)"};
+     } else if(!hasCoupon && hasPut){
+       const g=grossFromPut(p.put);
+       calibHit={put:p.put, coupon:+(g-p.mb).toFixed(2), src:"Auto IV (√IV)"};
+     } else if(!hasCoupon && !hasPut){
+       calibHit={put:solveFromK(10+p.mb), coupon:10, src:"Auto IV (√IV) 預設10%"};
+     }
+   }
+   // fallback: static table (if auto IV unavailable)
+   if(!calibHit){
+     if(!hasPut && hasCoupon){const v=calibHkSinglePut(p.ticker,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ HK single table"};}
+     else if(!hasCoupon && hasPut){const v=calibHkSingleCoupon(p.ticker,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK single table"};}
+     else if(!hasCoupon && !hasPut){const v=calibHkSinglePut(p.ticker,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK single (預設10%)"};}
+   }
+   if(!calibHit){
+     const m={tc:`0${p.ticker} 未有校準報價，暫未能定價。請先於 FinIQ 取一個真實報價加入校準表（現有：992/9992/9988/3690/1211/9999/700/5/2388）。`,
+              sc:`0${p.ticker} 未有校准报价，暂未能定价。请先于 FinIQ 取一个真实报价加入校准表。`,
+              en:`No calibration quote for ${p.ticker}.HK — cannot price. Please add a real FinIQ quote to the calibration table first.`};
+     $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+     return;
+   }
+   }
+ }
+    else {
+      // ---- US single: BS (Bloomberg IV) PRIMARY, then FinIQ table, then live IV model ----
+      const cA=callAdj(p.call);
+      if(bsCalibAvailable(p.ticker)){
+        if(!hasPut && hasCoupon){const r=calibBsSinglePut(p.ticker,p.coupon,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:+(r.put*cA).toFixed(2),coupon:p.coupon,src:r.src};}
+        else if(!hasCoupon && hasPut){const r=calibBsSingleCoupon(p.ticker,p.put,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:p.put,coupon:r.coupon,src:r.src};}
+        else if(!hasCoupon && !hasPut){const r=calibBsSinglePut(p.ticker,8,p.mb,p.call,p.tenor,p.cfreq); if(r)calibHit={put:+(r.put*cA).toFixed(2),coupon:8,src:r.src+" (預設8%)"};}
+      }
+      if(!calibHit){
         if(!hasPut && hasCoupon){
-          const g=(p.coupon+p.mb)/100*100; // gross% = coupon+mb
-          calibHit={put:solveFromK(p.coupon+p.mb), coupon:p.coupon, src:"Auto IV (√IV)"};
+          const v=calibUsPut(p.ticker,p.coupon,p.mb);
+          if(v!=null)calibHit={put:+(v*cA).toFixed(2),coupon:p.coupon,src:"FinIQ US single table"};
         } else if(!hasCoupon && hasPut){
-          const g=grossFromPut(p.put);
-          calibHit={put:p.put, coupon:+(g-p.mb).toFixed(2), src:"Auto IV (√IV)"};
+          const v=calibUsCoupon(p.ticker,p.put/cA,p.mb);
+          if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ US single table"};
         } else if(!hasCoupon && !hasPut){
-          calibHit={put:solveFromK(10+p.mb), coupon:10, src:"Auto IV (√IV) 預設10%"};
+          const v=calibUsPut(p.ticker,8,p.mb);
+          if(v!=null)calibHit={put:+(v*cA).toFixed(2),coupon:8,src:"FinIQ US single (預設8%)"};
         }
       }
-      // fallback: static table (if auto IV unavailable)
-      if(!calibHit){
-        if(!hasPut && hasCoupon){const v=calibHkSinglePut(p.ticker,p.coupon,p.mb); if(v!=null)calibHit={put:v,coupon:p.coupon,src:"FinIQ HK single table"};}
-        else if(!hasCoupon && hasPut){const v=calibHkSingleCoupon(p.ticker,p.put,p.mb); if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ HK single table"};}
-        else if(!hasCoupon && !hasPut){const v=calibHkSinglePut(p.ticker,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK single (預設10%)"};}
-      }
-      if(!calibHit){
-        const m={tc:`0${p.ticker} 未有校準報價，暫未能定價。請先於 FinIQ 取一個真實報價加入校準表（現有：992/9992/9988/3690/1211/9999/700/5/2388）。`,
-                 sc:`0${p.ticker} 未有校准报价，暂未能定价。请先于 FinIQ 取一个真实报价加入校准表。`,
-                 en:`No calibration quote for ${p.ticker}.HK — cannot price. Please add a real FinIQ quote to the calibration table first.`};
-        $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
-        return;
-      }
-    }
-    else {
-      // ---- US single: REAL FinIQ table PRIMARY (gross+call adjusted) ----
-      // live IV model only for stocks NOT in the table
-      const cA=callAdj(p.call);
-      if(!hasPut && hasCoupon){
-        const v=calibUsPut(p.ticker,p.coupon,p.mb);
-        if(v!=null)calibHit={put:+(v*cA).toFixed(2),coupon:p.coupon,src:"FinIQ US single table"};
-      } else if(!hasCoupon && hasPut){
-        const v=calibUsCoupon(p.ticker,p.put/cA,p.mb);
-        if(v!=null)calibHit={put:p.put,coupon:v,src:"FinIQ US single table"};
-      } else if(!hasCoupon && !hasPut){
-        const v=calibUsPut(p.ticker,8,p.mb);
-        if(v!=null)calibHit={put:+(v*cA).toFixed(2),coupon:8,src:"FinIQ US single (預設8%)"};
-      }
-      // not in table → fall through to live IV model (solveParams)
+      // not in any calib → fall through to live IV model (solveParams)
     }
   }catch(e){}
 
@@ -399,6 +452,16 @@ function recompute(){
                en:`⚠ Computed strike ${calibHit.put}% exceeds 95% — this coupon/MB combination is too rich for this stock's vol; unlikely to be dealable. Lower the coupon or MB.`};
       $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
       calibHit.put=Math.min(calibHit.put,99);
+    }
+    // ---- RM min-coupon rule: client coupon cannot be below (12/tenor)*MB% (RM cannot eat more than client) ----
+    if(calibHit.coupon!=null){
+      const minC = bsMinCoupon(p.tenor, p.mb);
+      if(calibHit.coupon < minC - 1e-6){
+        const m={tc:`⚠ 客戶票息低於最低要求：本結構最低票息須為 ${pct(minC)}（計算基準：12 ÷ ${p.tenor}個月 × MB ${pct(p.mb)}）。現計得 ${pct(calibHit.coupon)}，低於下限，RM 不可收取多於客戶之收益。請上調票息或下調 MB，否則此交易不可行。`,
+                 sc:`⚠ 客户票息低于最低要求：本结构最低票息须为 ${pct(minC)}（计算基准：12 ÷ ${p.tenor}个月 × MB ${pct(p.mb)}）。现计得 ${pct(calibHit.coupon)}，低于下限，RM 不可收取多于客户之收益。请上调票息或下调 MB，否则此交易不可行。`,
+                 en:`⚠ Client coupon below the minimum required: the minimum coupon for this structure is ${pct(minC)} (basis: 12 ÷ ${p.tenor} months × MB ${pct(p.mb)}). The computed ${pct(calibHit.coupon)} is below the floor — the RM cannot retain more than the client's yield. Raise the coupon or lower the MB, otherwise the trade is not viable.`};
+        $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
+      }
     }
   }
 
