@@ -568,7 +568,7 @@ function renderScenarios(S,p,out){
   const rows=[
     {t:T("sc1"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.cpnByFirstObs,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(S.firstObsMonths/12)*100),cls:"good"},
-    {t:T("sc2"),called:T("yes"),cpn:`累計=每期票息×期數`,
+    {t:T("sc2"),called:T("yes"),cpn:T("sc2formula"),
      prin:T("prinBack"),ret:"+"+sym(p.ccy)+fmt(S.cpnByFirstObs,0),cls:"good"},
     {t:T("sc3"),called:T("yes"),cpn:sym(p.ccy)+fmt(S.totalCpnIfHeld,0),
      prin:T("prinBack"),ret:"+"+pct(cpA*(p.tenor/12)*100),cls:"good"},
@@ -707,17 +707,20 @@ function saveSnapshot(){
     const slotW=Math.floor((CW-gap*(n-1))/n);
     shots.forEach((s,i)=>drawShot(s, ML+i*(slotW+gap), chY, slotW, chH));
   }
+  // SMA legend overlay: top-right corner of the chart
+  if(SMA_ON){
+    g.textAlign="right"; g.fillStyle="#f5c542"; g.font="bold 15px Arial";
+    g.fillText(`📈 ${$("smaN").value} SMA`, MR-8, chY+24);
+    g.textAlign="left";
+  }
   y=chY+chH+24;
 
-  // --- chart sub-notes: put level (lvlnote) + SMA legend — right below the chart ---
+  // --- chart sub-notes: put level (lvlnote) — right below the chart ---
   if(CHARTS[0] && CHARTS[0]._lvlNote && CHARTS[0]._lvlNote.innerText.trim()){
     y+=4; g.fillStyle="#cfe0ff"; g.font="15px Arial";
     wrapLines(g, CHARTS[0]._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
   }
-  if(SMA_ON){
-    y+=4; g.fillStyle="#f5c542"; g.font="bold 15px Arial";
-    g.fillText(`📈 ${$("smaN").value} SMA overlay`,ML,y); y+=22;
-  }
+  // SMA legend: drawn at top-right corner of the chart (overlay)
   y+=22;
 
   // --- Section 2: scenario table ---
@@ -770,9 +773,18 @@ function saveSnapshot(){
         const k=kvs[i].innerText.trim(), v=kvs[i+1].innerText.trim();
         g.fillStyle="#9fb3d1"; g.font="15px Arial"; g.textAlign="right";
         g.fillText(k, ML+KVW, y);
-        g.textAlign="left"; g.fillStyle="#f5c542"; g.font="bold 15px Arial";   // gold value (dashboard highlight)
-        wrapLines(g,v,MR-(ML+KVW+12)).forEach((ln,k2)=>{ g.fillText(ln,ML+KVW+12,y+k2*22); });
-        y+=22*Math.max(1,wrapLines(g,v,MR-(ML+KVW+12)).length)+4;
+        g.textAlign="left"; g.font="bold 15px Arial";
+        // value: highlight the key number/amount (first token) gold, rest in light text
+        const sp=v.indexOf(" ");
+        const numPart = sp>0 ? v.slice(0,sp) : v;
+        const restPart = sp>0 ? v.slice(sp) : "";
+        g.fillStyle="#f5c542"; g.fillText(numPart, ML+KVW+12, y);
+        if(restPart){
+          g.fillStyle="#9fb3d1"; g.font="14px Arial";
+          const lines=wrapLines(g,restPart,MR-(ML+KVW+12+g.measureText(numPart).width+6));
+          g.fillText(restPart.replace(/\s+/g," ").trim(), ML+KVW+12+g.measureText(numPart).width+6, y);
+        }
+        y+=26;
       }
       return;
     }
