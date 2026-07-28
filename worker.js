@@ -229,27 +229,79 @@ export default {
         IVY_CACHE.set(cacheKey, { ts: Date.now(), data });
         return json(data);
       }
-      // /iv-cboe — CBOE delayed options: 30-day implied IV (iv30) + spot. Key-free, no crumb.
-      //   Most accurate free implied-IV source; covers all US stocks. HK not on CBOE → caller falls back.
+      // /iv-cboe — CBOE delayed options: ATM implied IV for a target tenor (days).
+      //   Key-free, no crumb. Computes ATM IV from the options chain at the expiry closest
+      //   to the requested tenor (e.g. 2M->60d, 3M->90d), using CBOE current_price as spot.
+      //   Falls back to iv30 if no liquid near-expiry contracts. HK not on CBOE -> caller falls back.
       if (path === "/iv-cboe") {
         const symbol = (url.searchParams.get("symbol") || "").toUpperCase().replace(/\.HK$/i, "");
         if (!symbol) return json({ error: "symbol required" }, 400);
-        const cacheKey = "cboe:" + symbol;
+        const tenorDays = Math.min(365, Math.max(7, +(url.searchParams.get("tenor") || "90")));
+        const cacheKey = `cboe:v2:${symbol}:${tenorDays}`;
         const cached = CB_CACHE.get(cacheKey);
         if (cached && Date.now() - cached.ts < 30 * 60 * 1000) {
           return json({ ...cached.data, cached: true });
         }
         const r = await fetch(`https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(symbol)}.json`, { headers: { "User-Agent": UA } });
         const j = await r.json().catch(() => null);
-        if (!j || !j.data || j.data.iv30 == null) {
+        if (!j || !j.data || (!j.data.iv30 && !j.data.options)) {
           return json({ error: "no_cboe_data", symbol }, 404);
         }
+        const S = j.data.current_price;
+        let iv_pct = null, usedTenor = tenorDays, usedExp = null;
+        const opts = j.data.options;
+        if (S && opts && opts.length) {
+          const parsed = opts.map(o => {
+            const m = /^([A-Z]+)(\d{6})([CP])(\d+)$/.exec(o.option);
+            if (!m) return null;
+            const y = "20" + m[2].slice(0, 2), mo = m[2].slice(2, 4), d = m[2].slice(4, 6);
+            return { date: `${y}-${mo}-${d}`, type: m[3], strike: +(m[4] / 1000).toFixed(2), bid: o.bid, ask: o.ask, last: o.last };
+          }).filter(Boolean);
+          const now = Date.now();
+          const exps = [...new Set(parsed.map(p => p.date))].filter(e => new Date(e).getTime() > now + 864e5);
+          // primary: closest to target tenor (by days). require >=2 liquid near-ATM (±5%) contracts;
+          // if the closest lacks liquidity, fall through to next-closest. last resort: closest anyway.
+          const liquidCnt = e => parsed.filter(p => p.date === e && p.strike >= S * 0.95 && p.strike <= S * 1.05 && (p.bid > 0 || p.last > 0)).length;
+          const byDays = exps.slice().sort((a, b) => Math.abs((new Date(a).getTime() - now) / 864e5 - tenorDays) - Math.abs((new Date(b).getTime() - now) / 864e5 - tenorDays));
+          let best = byDays.find(e => liquidCnt(e) >= 2) || byDays[0];
+          if (best) {
+            const Tt = (new Date(best).getTime() - now) / (365 * 864e5);
+            const r4 = 0.04;
+            const near = parsed.filter(p => p.date === best && p.strike >= S * 0.95 && p.strike <= S * 1.05 && (p.bid > 0 || p.last > 0));
+            let ivs = [];
+            for (const o of near) {
+              const px = o.last > 0 ? o.last : (o.bid + o.ask) / 2;
+              if (px <= 0) continue;
+              // BS IV bisection
+              let lo = 0.001, hi = 5;
+              for (let i = 0; i < 60; i++) {
+                const mm = (lo + hi) / 2;
+                const d1 = (Math.log(S / o.strike) + (r4 + 0.5 * mm * mm) * Tt) / (mm * Math.sqrt(Tt));
+                const d2 = d1 - mm * Math.sqrt(Tt);
+                const price = o.type === "C"
+                  ? S * 0.5 * (1 + Math.sign(d1) * Math.sqrt(1 - Math.exp(-2 * d1 * d1 / Math.PI))) - o.strike * Math.exp(-r4 * Tt) * 0.5 * (1 + Math.sign(d2) * Math.sqrt(1 - Math.exp(-2 * d2 * d2 / Math.PI)))
+                  : o.strike * Math.exp(-r4 * Tt) * 0.5 * (1 - Math.sign(d2) * Math.sqrt(1 - Math.exp(-2 * d2 * d2 / Math.PI))) - S * 0.5 * (1 - Math.sign(d1) * Math.sqrt(1 - Math.exp(-2 * d1 * d1 / Math.PI)));
+                if ((price - px) > 0) hi = mm; else lo = mm;
+              }
+              const iv = (lo + hi) / 2;
+              if (iv > 0 && iv < 3) ivs.push(iv * 100);
+            }
+            if (ivs.length) {
+              iv_pct = +ivs.reduce((a, b) => a + b, 0) / ivs.length;
+              usedTenor = Math.round(Tt * 365);
+              usedExp = best;
+            }
+          }
+        }
+        if (iv_pct == null && j.data.iv30 != null) { iv_pct = +j.data.iv30; usedTenor = 30; } // fallback to 30d
+        if (iv_pct == null) return json({ error: "no_cboe_iv", symbol }, 404);
         const data = {
           symbol,
-          iv_pct: +(j.data.iv30).toFixed(2),
-          spot: j.data.current_price != null ? +j.data.current_price : null,
-          tenor_months: 1,            // iv30 = 30-day implied vol
-          source: "cboe_iv30",
+          iv_pct: +iv_pct.toFixed(2),
+          spot: S != null ? +S : null,
+          tenor_months: +(usedTenor / 30.44).toFixed(1),
+          expiry: usedExp,
+          source: "cboe_atm_iv",
           as_of: j.data.last_trade_time || new Date().toISOString().slice(0, 10),
         };
         CB_CACHE.set(cacheKey, { ts: Date.now(), data });

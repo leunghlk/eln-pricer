@@ -107,15 +107,16 @@ function sampleCandles(days){
 async function fetchIV(input, tenorMonths, strikePct){
   const y=usSym(input);
   const tk=normSym(y);
-  // ---- 1) Worker /iv-cboe (primary, CBOE 30d implied IV) ----
+  // ---- 1) Worker /iv-cboe (primary, CBOE ATM implied IV at the deal tenor) ----
   try{
-    const r=await fetch(`${WORKER_URL}/iv-cboe?symbol=${encodeURIComponent(y)}`);
+    const tenorDays = Math.round((tenorMonths||3)*30.44);
+    const r=await fetch(`${WORKER_URL}/iv-cboe?symbol=${encodeURIComponent(y)}&tenor=${tenorDays}`);
     const j=await r.json();
     if(j && j.iv_pct!=null && j.iv_pct>0){
       const iv=j.iv_pct/100;
       return {atm:iv, atStrike:iv, spot:j.spot||null,
-        source:"cboe_iv30", expiry:"30d IV", strikeUsed:null,
-        worker_source:j.source, as_of:j.as_of};
+        source:"cboe_atm_iv", expiry:(j.tenor_months||1)+"M ATM", strikeUsed:null,
+        worker_source:j.source, as_of:j.as_of, cboe_expiry:j.expiry};
     }
   }catch(e){}
   // ---- 2) Worker /iv-yahoo (Yahoo 3M ATM implied IV) ----

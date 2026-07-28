@@ -197,7 +197,7 @@ async function loadIV(){
     const results=await Promise.all(BASKET.map(s=>fetchIV(s,p.tenor,strikeGuess).catch(()=>null)));
     BASKET_IV=results.map((r,i)=>({sym:BASKET[i],ivK:r?r.atStrike:null,ivA:r?r.atm:null,src:r?r.source:"none",expiry:r?r.expiry:null,spot:r?r.spot:null,strikeUsed:r?r.strikeUsed:null})).filter(x=>x.ivK!=null);
     // pricing driver = highest-vol component (worst-of); real sources = live/worker_auto/bloomberg*
-    const isRealSrc = x => ["live","worker_auto","bloomberg","bloomberg_fallback","bloomberg_offline","cboe_iv30"].includes(x.src);
+    const isRealSrc = x => ["live","worker_auto","bloomberg","bloomberg_fallback","bloomberg_offline","cboe_atm_iv"].includes(x.src);
     const live=BASKET_IV.filter(isRealSrc);
     const drv=(live.length?live:BASKET_IV).slice().sort((a,b)=>b.ivK-a.ivK)[0];
     LAST_IV = drv ? {atm:drv.ivA,atStrike:drv.ivK,spot:drv.spot,source:drv.src,expiry:drv.expiry,strikeUsed:drv.strikeUsed} : {atm:0.5,atStrike:0.6,source:"sample"};
@@ -216,11 +216,11 @@ function renderBasketIV(list, drv){
   list.forEach(x=>{
     const isDrv = drv && x.sym===drv.sym;
     const el=document.createElement("div");el.className="bank"+(isDrv?" drv":"");
-    const isRealSrc = ["live","worker_auto","bloomberg","bloomberg_fallback","bloomberg_offline","cboe_iv30"].includes(x.src);
+    const isRealSrc = ["live","worker_auto","bloomberg","bloomberg_fallback","bloomberg_offline","cboe_atm_iv"].includes(x.src);
     const srcLabel = x.src==="auto" ? ("auto "+(x.autoWindow||"90d"))
                    : x.src==="live" ? ("live · "+(x.expiry||""))
                    : x.src==="worker_auto" ? "auto · Yahoo 3M ATM"
-                   : x.src==="cboe_iv30" ? "CBOE 30d IV"
+                   : x.src==="cboe_atm_iv" ? "CBOE ATM IV"
                    : x.src==="bloomberg" ? "Bloomberg · 3M 100%-mn"
                    : x.src==="bloomberg_fallback" ? "Bloomberg (fallback)"
                    : x.src==="bloomberg_offline" ? "Bloomberg (offline)"
@@ -256,11 +256,11 @@ function renderBanks(iv){
   const banks=["HSBC","JPM","BNP","UBS","SG","Barclays"];
   const seeds={HSBC:1.0,JPM:0.98,BNP:1.05,UBS:1.02,SG:1.08,Barclays:1.03};
   const base=iv.atm||0.5;
-  const isReal = iv.source==='live'||iv.source==='bloomberg'||iv.source==='worker_auto'||iv.source==='bloomberg_fallback'||iv.source==='bloomberg_offline'||iv.source==='cboe_iv30';
+  const isReal = iv.source==='live'||iv.source==='bloomberg'||iv.source==='worker_auto'||iv.source==='bloomberg_fallback'||iv.source==='bloomberg_offline'||iv.source==='cboe_atm_iv';
   const srcClass = isReal ? 'live' : 'samp';
   const srcLabel = iv.source==='live' ? ('live · '+(iv.expiry||''))
                  : iv.source==='worker_auto' ? ('auto · Yahoo 3M ATM'+(iv.expiry||''))
-                 : iv.source==='cboe_iv30' ? ('CBOE 30d IV'+(iv.as_of?' · '+iv.as_of:''))
+                 : iv.source==='cboe_atm_iv' ? ('CBOE '+(iv.expiry||'ATM')+' IV'+(iv.as_of?' · '+iv.as_of:''))
                  : iv.source==='bloomberg_fallback' ? ('Bloomberg (fallback) · 3M 100%-mn')
                  : iv.source==='bloomberg' ? ('Bloomberg · '+(iv.expiry||''))
                  : iv.source==='bloomberg_offline' ? ('Bloomberg (offline) · 3M 100%-mn')
@@ -282,12 +282,13 @@ function renderBanks(iv){
       : (LANG==="sc")
       ? `✅ ${tag} 3个月 100% 价外 IV · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>。各行均为按惯例 spread 调整的 indicative。`
       : `✅ ${tag} 3個月 100%-moneyness IV · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>。各行均為按慣例 spread 調整之 indicative。`;
-  } else if(iv.source==="cboe_iv30"){
+  } else if(iv.source==="cboe_atm_iv"){
+    const tlabel = (iv.expiry||"ATM")+" ATM";
     note = (LANG==="en")
-      ? `✅ Auto IV (CBOE 30-day implied vol, key-free) · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · as of '+iv.as_of:''}. Bank rows are indicative (spread-adjusted).`
+      ? `✅ Auto IV (CBOE ${tlabel} implied vol, key-free) · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · as of '+iv.as_of:''}. Bank rows are indicative (spread-adjusted).`
       : (LANG==="sc")
-      ? `✅ 自动 IV（CBOE 30日 隐含波动率，免密钥）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · 截至 '+iv.as_of:''}。各行均为按惯例 spread 调整的 indicative。`
-      : `✅ 自動 IV（CBOE 30日 implied vol，免 key）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · 截至 '+iv.as_of:''}。各行均為按慣例 spread 調整之 indicative。`;
+      ? `✅ 自动 IV（CBOE ${tlabel} 隐含波动率，免密钥）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · 截至 '+iv.as_of:''}。各行均为按惯例 spread 调整的 indicative。`
+      : `✅ 自動 IV（CBOE ${tlabel} implied vol，免 key）· ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b>${iv.as_of?' · 截至 '+iv.as_of:''}。各行均為按慣例 spread 調整之 indicative。`;
   } else if(iv.source==="live"){
     note = (LANG==="en")
       ? `✅ Real Option IV (auto-updated via Yahoo) · ATM ≈ <b>${atm}</b> · strike(${stk}) IV ≈ <b>${stkiv}</b> · expiry ${exp}. Bank rows are indicative (spread-adjusted).`
