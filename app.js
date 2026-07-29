@@ -59,6 +59,7 @@ async function runAll(){
     p.manual = false;
   }
   $("tickerName").textContent="→ "+tickerName(p.ticker);
+  if(p.basket) BASKET=p.basketList.slice();   // update BASKET BEFORE loadChart so multi-chart renders
   await loadChart(CUR.range||"6mo");
   await loadIV();
   recompute();
@@ -369,7 +370,7 @@ function recompute(){
         // HK basket with unknown component — never fall through to the US IV model
         const allHkNum = BASKET.every(s=>/^\d+$/.test(String(s).replace(/\.HK$/i,"").trim()));
         if(!calibHit && allHkNum){
-          const m={tc:`籃子內有成分股未有校準報價（現有單頭：992/9992/9988/3690/1211/9999/700/5/2388），暫未能定價。請先加入該股之 FinIQ 真實報價。`,
+          const m={tc:`籃子內有成分股未有校準報價（現有單頭：992/9992/9988/3690/1211/9999/700/5/2388/388），暫未能定價。請先加入該股之 FinIQ 真實報價。`,
                    sc:`篮子内有成分股未有校准报价，暂未能定价。请先加入该股之 FinIQ 真实报价。`,
                    en:`A basket component has no calibration quote — cannot price. Please add a real FinIQ quote for it first.`};
           $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);
@@ -413,7 +414,7 @@ function recompute(){
      else if(!hasCoupon && !hasPut){const v=calibHkSinglePut(p.ticker,10,p.mb); if(v!=null)calibHit={put:v,coupon:10,src:"FinIQ HK single (預設10%)"};}
    }
    if(!calibHit){
-     const m={tc:`0${p.ticker} 未有校準報價，暫未能定價。請先於 FinIQ 取一個真實報價加入校準表（現有：992/9992/9988/3690/1211/9999/700/5/2388）。`,
+     const m={tc:`0${p.ticker} 未有校準報價，暫未能定價。請先於 FinIQ 取一個真實報價加入校準表（現有：992/9992/9988/3690/1211/9999/700/5/2388/388）。`,
               sc:`0${p.ticker} 未有校准报价，暂未能定价。请先于 FinIQ 取一个真实报价加入校准表。`,
               en:`No calibration quote for ${p.ticker}.HK — cannot price. Please add a real FinIQ quote to the calibration table first.`};
      $("err").style.display="block";$("err").textContent=(m[LANG]||m.tc);

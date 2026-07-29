@@ -18,7 +18,7 @@ const CALIB = {
   // ---- 港股單一股 strike（90 call；coupon 待確認，暫存作參考） ----
   hk_single_ref: {
     "992":64, "9992":76, "9988":77, "3690":75, "1211":80,
-    "9999":83, "700":85, "5":90, "2388":91.5
+    "9999":83, "700":85, "5":90, "2388":91.5, "388":92.47
   },
   hk_single_cpn_slope: 1.5,   // +1.5p strike per +1% coupon
   hk_single_mb_slope: 7,      // +7p strike per +1% MB
