@@ -109,6 +109,7 @@ function renderCharts(tickers, all){
     const c=newChart(el);
     c._spot = all[i].data.length ? all[i].data[all[i].data.length-1].close : 0;
     c._tt = tt; c._lvlNote = lvlNote; c._data = all[i].data;
+    c._tk = t;   // store ticker for JPG export per-chart labels
     c.series.setData(all[i].data);
     c.chart.timeScale().fitContent();
     c.chart.timeScale().scrollToRealTime();   // 最後一支燭貼右邊，唔好被 whitespace 切走（否則看似停喺前一交易日）
@@ -711,34 +712,57 @@ function saveSnapshot(){
   let y=104;
   g.fillStyle="#3a4a68"; g.font="bold 19px Arial";
   g.fillText(LANG==="en"?"1 · Daily Chart":(LANG==="sc"?"1 · 日线图":"1 · 日線圖"),ML,y); y+=22;
-  const chY=y, chH=640;
+  const chH=640;
   function drawShot(src,x,yy,w,h){
     const sw=src.width, sh=src.height; if(!sw||!sh)return;
     const scale=Math.min(w/sw, h/sh);
     const dw=Math.round(sw*scale), dh=Math.round(sh*scale);
     g.drawImage(src, x+Math.round((w-dw)/2), yy+Math.round((h-dh)/2), dw, dh);
   }
-  if(shots.length===1){ drawShot(shots[0],ML,chY,CW,chH); }
-  else{
+  if(shots.length===1){
+    // --- Single chart ---
+    const chY=y, c=CHARTS[0];
+    drawShot(shots[0],ML,chY,CW,chH);
+    if(SMA_ON){ g.textAlign="right"; g.fillStyle="#8a6d1f"; g.font="bold 15px Arial";
+      g.fillText(`📈 ${$("smaN").value} SMA`, MR-8, chY+24); g.textAlign="left"; }
+    y=chY+chH+24;
+    if(c && c._lvlNote && c._lvlNote.innerText.trim()){
+      y+=4; g.fillStyle="#3a4a68"; g.font="15px Arial";
+      wrapLines(g, c._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
+    }
+  } else {
+    // --- Basket: per-chart stock name + chart + note ---
     const n=shots.length, gap=12;
     const slotW=Math.floor((CW-gap*(n-1))/n);
+    const maxNoteLines=4;  // reserve space; each chart gets its own note block
+    // per-chart name label above each chart
+    g.font="bold 16px Arial";
+    CHARTS.forEach((c,i)=>{
+      const x=ML+i*(slotW+gap);
+      const tk=c._tk||(p.basket?BASKET[i]:p.ticker);
+      const nm=tickerName(tk);
+      g.fillStyle="#8a6d1f"; g.textAlign="left";
+      g.fillText(`${tk} · ${nm}`, x, y+18);
+    });
+    y+=28;
+    const chY=y;
     shots.forEach((s,i)=>drawShot(s, ML+i*(slotW+gap), chY, slotW, chH));
+    if(SMA_ON){ g.textAlign="right"; g.fillStyle="#8a6d1f"; g.font="bold 15px Arial";
+      g.fillText(`📈 ${$("smaN").value} SMA`, MR-8, chY+24); g.textAlign="left"; }
+    y=chY+chH+20;
+    // per-chart lvlnote: each chart gets its own note under its slot
+    g.font="13px Arial"; g.textAlign="left";
+    CHARTS.forEach((c,i)=>{
+      const x=ML+i*(slotW+gap);
+      if(c && c._lvlNote && c._lvlNote.innerText.trim()){
+        g.fillStyle="#3a4a68";
+        const lines=wrapLines(g, c._lvlNote.innerText.replace(/\s+/g," ").trim(), slotW);
+        lines.forEach((ln,k)=>{ g.fillText(ln, x, y+k*18); });
+      }
+    });
+    y+=maxNoteLines*18+10;
   }
-  // SMA legend overlay: top-right corner of the chart
-  if(SMA_ON){
-    g.textAlign="right"; g.fillStyle="#8a6d1f"; g.font="bold 15px Arial";
-    g.fillText(`📈 ${$("smaN").value} SMA`, MR-8, chY+24);
-    g.textAlign="left";
-  }
-  y=chY+chH+24;
-
-  // --- chart sub-notes: put level (lvlnote) — right below the chart ---
-  if(CHARTS[0] && CHARTS[0]._lvlNote && CHARTS[0]._lvlNote.innerText.trim()){
-    y+=4; g.fillStyle="#3a4a68"; g.font="15px Arial";
-    wrapLines(g, CHARTS[0]._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
-  }
-  // SMA legend: drawn at top-right corner of the chart (overlay)
-  y+=22;
+  y+=12;
 
   // --- Section 2: scenario table ---
   g.fillStyle="#3a4a68"; g.font="bold 19px Arial";
