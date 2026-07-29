@@ -95,8 +95,8 @@ input[type=number]{color-scheme:light}
 .cht-tt{position:absolute;z-index:30;background:rgba(255,255,255,.95);border:1px solid var(--gold);border-radius:8px;
   padding:8px 10px;font-size:12px;line-height:1.5;color:var(--txt);pointer-events:none;white-space:nowrap;
   box-shadow:0 4px 14px rgba(0,0,0,.1)}
-.lvlnote{margin-top:6px;font-size:12.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
-  border-radius:8px;padding:7px 10px;line-height:1.5}
+.lvlnote{margin-top:6px;font-size:14px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
+  border-radius:8px;padding:8px 12px;line-height:1.55}
 .tabrow{display:flex;gap:0;margin-bottom:12px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .tab{background:var(--panel2);color:var(--muted);border:none;padding:9px 14px;cursor:pointer;font-size:13px;flex:1}
 .tab.on{background:var(--gold);color:#fff;font-weight:700}

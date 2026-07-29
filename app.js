@@ -811,19 +811,22 @@ function saveSnapshot(){
     if(cls.includes("kv")){                        // key-value grid row(s)
       const kvs=[...ch.children];
       for(let i=0;i+1<kvs.length;i+=2){
-        const k=kvs[i].innerText.trim(), v=kvs[i+1].innerText.trim();
+        const k=kvs[i].innerText.trim(), v=kvs[i+1].innerText.replace(/\s+/g," ").trim();
         g.fillStyle="#5a6a85"; g.font="15px Arial"; g.textAlign="right";
         g.fillText(k, ML+KVW, y);
         g.textAlign="left"; g.font="bold 15px Arial";
-        // value: highlight the key number/amount (first token) gold, rest in light text
-        const sp=v.indexOf(" ");
-        const numPart = sp>0 ? v.slice(0,sp) : v;
-        const restPart = sp>0 ? v.slice(sp) : "";
-        g.fillStyle="#8a6d1f"; g.fillText(numPart, ML+KVW+12, y);
-        if(restPart){
-          g.fillStyle="#5a6a85"; g.font="14px Arial";
-          const lines=wrapLines(g,restPart,MR-(ML+KVW+12+g.measureText(numPart).width+6));
-          g.fillText(restPart.replace(/\s+/g," ").trim(), ML+KVW+12+g.measureText(numPart).width+6, y);
+        // value: if starts with a number/amount → highlight only that; otherwise whole value gold
+        const numMatch = v.match(/^[US\$HK\$€]?\s*[\d,.]+[%]?/);
+        if(numMatch){
+          const numPart=numMatch[0];
+          const restPart=v.slice(numPart.length);
+          g.fillStyle="#8a6d1f"; g.fillText(numPart, ML+KVW+12, y);
+          if(restPart){
+            g.fillStyle="#5a6a85"; g.font="14px Arial";
+            g.fillText(restPart, ML+KVW+12+g.measureText(numPart).width+6, y);
+          }
+        } else {
+          g.fillStyle="#8a6d1f"; g.fillText(v, ML+KVW+12, y);
         }
         y+=26;
       }
