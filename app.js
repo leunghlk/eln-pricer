@@ -727,8 +727,8 @@ function saveSnapshot(){
       g.fillText(`📈 ${$("smaN").value} SMA`, MR-8, chY+24); g.textAlign="left"; }
     y=chY+chH+24;
     if(c && c._lvlNote && c._lvlNote.innerText.trim()){
-      y+=4; g.fillStyle="#3a4a68"; g.font="15px Arial";
-      wrapLines(g, c._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=22; });
+      y+=4; g.fillStyle="#3a4a68"; g.font="16px Arial";
+      wrapLines(g, c._lvlNote.innerText.replace(/\s+/g," ").trim(), MR-ML).forEach(ln=>{ g.fillText(ln,ML,y); y+=24; });
     }
   } else {
     // --- Basket: per-chart stock name + chart + note ---
@@ -803,11 +803,11 @@ function saveSnapshot(){
   const det=$("scnDetail");
   [...det.children].forEach(ch=>{
     const cls=(ch.className||"");
-    if(cls.includes("scnhead")) return;          // main title already drawn above
-    if(cls.includes("scnhead2")){                 // section sub-header
+    if(cls.includes("scnhead2")){                 // section sub-header (到期未收回 / 打和價)
       y+=8; g.fillStyle="#8a6d1f"; g.font="bold 16px Arial";
       g.fillText(ch.innerText.trim(),ML,y); y+=26; return;
     }
+    if(cls==="scnhead" || (cls.includes("scnhead") && !cls.includes("scnhead2"))) return; // main title, already drawn
     if(cls.includes("kv")){                        // key-value grid row(s)
       const kvs=[...ch.children];
       for(let i=0;i+1<kvs.length;i+=2){
@@ -850,10 +850,20 @@ function saveSnapshot(){
   const ctx=cv.getContext("2d");
   ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality="high";
   ctx.drawImage(tmp,0,0,W,usedH,0,0,W,usedH);
-  cv.toBlob(blob=>{
+  cv.toBlob(async blob=>{
+    const fname=`ELN_${stk}_${new Date().toISOString().slice(0,10)}.jpg`;
+    // Prefer Web Share API (mobile: saves to Photos / shares directly)
+    if(navigator.canShare && navigator.canShare({files:[new File([blob],fname,{type:"image/jpeg"})]})){
+      try{
+        const file=new File([blob],fname,{type:"image/jpeg"});
+        await navigator.share({files:[file],title:"ELN Pricer",text:fname});
+        return;
+      }catch(e){ /* user cancelled or share failed → fall through to download */ }
+    }
+    // Fallback: show full-resolution preview image (long-press to save on mobile)
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
-    a.href=url; a.download=`ELN_${stk}_${new Date().toISOString().slice(0,10)}.jpg`;
+    a.href=url; a.download=fname;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },"image/jpeg",0.95);
